@@ -12,11 +12,13 @@ IAM viene prima di reti e server perché **ogni singola chiamata ad AWS passa da
 
 ## 1. Il modello mentale
 
-Ogni richiesta ad AWS si riduce a una domanda:
+Ogni operazione su AWS, che sia un clic in console, un comando della CLI o un `apply` di Terraform, diventa una **chiamata API**: una richiesta a un servizio AWS con un nome preciso, come `GetObject` ("dammi questo file") di S3 o `RunInstances` ("avvia un server") di EC2. Ogni chiamata si riduce a una domanda:
 
 > **Chi** (principal) vuole fare **cosa** (action) su **quale risorsa** (resource), e **a quali condizioni** (condition)?
 
-Esempio: *il role dell'applicazione* vuole fare *s3:GetObject* sull'*oggetto releases/app.zip del bucket artefatti*, *dall'interno del VPC*.
+Il **principal** è chiunque faccia la richiesta: una persona, un'applicazione, un servizio AWS.
+
+Esempio: *il role dell'applicazione* vuole fare *s3:GetObject* sull'*oggetto releases/app.zip del bucket artefatti*, *dall'interno della rete privata dell'azienda su AWS* (il VPC, dispensa 2).
 
 IAM guarda le policy applicabili e risponde **sì** o **no**. Tutto il resto di questa dispensa è il dettaglio di questa domanda.
 
@@ -33,15 +35,17 @@ IAM è un servizio **globale**, non legato a una regione: un role creato vale in
 | **Gruppo IAM** | Nessuna | Contenitore di utenti per assegnare policy in blocco |
 | **Role** | Nessuna propria: si **assume** e produce credenziali **temporanee** | Il modo giusto per quasi tutto: servizi AWS, applicazioni, persone |
 
-Per le **persone**, la strada moderna è **IAM Identity Center** (SSO): le persone si autenticano col proprio IdP aziendale, con MFA, e ricevono credenziali temporanee legate a un role. Niente utenti IAM singoli da gestire.
+Per le **persone**, la strada moderna è **IAM Identity Center** (SSO), quello configurato nella dispensa 0: le persone si autenticano una volta, con **MFA** (il secondo fattore: il codice dall'app sul telefono), e ricevono credenziali temporanee legate a un role. In azienda, di solito, Identity Center si appoggia all'**IdP** (*identity provider*) aziendale, cioè il sistema che gestisce già gli account dei dipendenti (Microsoft Entra ID, Google Workspace, Okta…). Niente utenti IAM singoli da gestire.
 
-Per le **macchine** (EC2, Lambda, pipeline di CI), si usano **role** assunti dal servizio.
+Per le **macchine** (un server EC2, una funzione Lambda, la pipeline che rilascia il codice) si usano **role** assunti dal servizio.
+
+Il permission set `AdministratorAccess` che hai assegnato al tuo utente nella dispensa 0 è, dietro le quinte, proprio un role: il suo nome inizia con `AWSReservedSSO_`, ed è quello che vedi in `aws sts get-caller-identity`.
 
 ### Come funziona "assumere un role"
 
-1. Un principal chiede al servizio **STS** di assumere un role (`sts:AssumeRole`).
+1. Un principal chiede al servizio **STS** (*Security Token Service*, il servizio AWS che rilascia credenziali temporanee) di assumere un role (`sts:AssumeRole`).
 2. STS controlla la **trust policy** del role: questo principal è autorizzato ad assumerlo?
-3. Se sì, STS restituisce credenziali temporanee (access key, secret e session token) che scadono dopo un tempo definito (di default un'ora).
+3. Se sì, STS restituisce credenziali temporanee che scadono dopo un tempo definito (di default un'ora). Sono tre valori: *access key* (come un nome utente), *secret access key* (come una password) e *session token* (il "timbro" che le rende temporanee). La CLI e Terraform le gestiscono da soli: non devi mai copiarle a mano.
 4. Con quelle credenziali il principal agisce **come** il role, con i permessi del role.
 
 ```mermaid
@@ -65,7 +69,7 @@ sequenceDiagram
 
 ## 3. Anatomia di una policy
 
-Una policy è un documento JSON:
+Una policy è un documento **JSON**, un formato di testo per dati strutturati molto simile alle mappe di HCL: `{ }` racchiude coppie `"nome": valore` separate da virgole, `[ ]` racchiude liste. Dove un campo ammette una lista, un valore singolo si può scrivere anche senza `[ ]`: `"Action": "s3:GetObject"` equivale a `"Action": ["s3:GetObject"]`.
 
 ```json
 {
@@ -84,6 +88,8 @@ Una policy è un documento JSON:
 }
 ```
 
+Letta in italiano: "consenti di leggere i file che stanno sotto `releases/` nel bucket `corso-artefatti`, ma solo se la richiesta arriva da un certo punto di accesso privato alla rete (`vpce-0abc123`)". I singoli campi:
+
 | Campo | Significato |
 |---|---|
 | `Version` | Sempre `2012-10-17` (è la versione del linguaggio, non una data da aggiornare) |
@@ -94,17 +100,38 @@ Una policy è un documento JSON:
 | `Condition` | Vincoli aggiuntivi (rete di provenienza, MFA, tag, regione…) |
 | `Principal` | **Chi**: compare solo nelle policy attaccate alle risorse e nelle trust policy |
 
+Nelle azioni si può usare il jolly `*`, che significa "qualunque sequenza di caratteri": `ec2:Describe*` vuol dire "tutte le azioni EC2 il cui nome inizia con Describe", cioè tutte quelle di sola lettura.
+
+### Le condition key
+
+Nel campo `Condition`, `aws:SourceVpce` è una **condition key**: una variabile che AWS riempie da solo con il contesto della richiesta. Qui contiene l'identificativo del *VPC endpoint* da cui arriva la richiesta, cioè una "porta privata" verso S3 che vedremo nella dispensa 7. Le chiavi che iniziano con `aws:` valgono per tutti i servizi (per esempio `aws:SourceIp`, l'indirizzo di provenienza, o `aws:MultiFactorAuthPresent`, "ha usato l'MFA?"); quelle con il prefisso di un servizio, come `s3:prefix`, valgono solo per quel servizio. `StringEquals` è il tipo di confronto: "uguale, carattere per carattere". Esiste anche `StringLike`, che ammette il jolly `*`.
+
 ### Gli ARN
 
-L'ARN (Amazon Resource Name) identifica univocamente una risorsa:
+L'ARN (Amazon Resource Name) identifica univocamente una risorsa. È fatto di campi separati da `:`:
 
 ```
-arn:aws:s3:::corso-artefatti                 # il bucket
-arn:aws:s3:::corso-artefatti/releases/*      # gli oggetti sotto releases/
-arn:aws:iam::123456789012:role/app-reader    # un role
+arn : partizione : servizio : regione : account : risorsa
 ```
 
-Attenzione al classico errore su S3: **il bucket e i suoi oggetti sono risorse diverse**. `s3:ListBucket` si applica al bucket (ARN senza `/`), `s3:GetObject` agli oggetti (ARN con `/*`).
+- **partizione**: quasi sempre `aws`;
+- **servizio**: `s3`, `iam`, `ec2`…;
+- **regione** e **account**: dove sta la risorsa. L'account è il numero a 12 cifre del tuo account AWS;
+- **risorsa**: il nome della risorsa, a volte preceduto dal tipo (`role/…`).
+
+Alcuni servizi lasciano vuoti dei campi, e si vedono due o tre `:` di fila:
+
+```
+arn:aws:s3:::corso-artefatti                 # il bucket: S3 non mette né regione né account (il nome è già unico al mondo)
+arn:aws:s3:::corso-artefatti/releases/*      # gli oggetti sotto releases/  (* = qualunque nome)
+arn:aws:iam::123456789012:role/app-reader    # un role: IAM è globale, niente regione
+```
+
+### Bucket, oggetti e prefissi
+
+In S3 i file si chiamano **oggetti** e ognuno ha una **chiave**, cioè il nome completo: per esempio `releases/app-v1.0.txt`. Le cartelle, in realtà, **non esistono**: `releases/` è solo l'inizio del nome, e si chiama **prefisso**. La console lo mostra come una cartella per comodità.
+
+Da qui il classico errore su S3: **il bucket e i suoi oggetti sono risorse diverse**. `s3:ListBucket` ("elenca il contenuto") si applica al bucket (ARN senza `/`), `s3:GetObject` ("scarica un file") agli oggetti (ARN con `/*`).
 
 ---
 
@@ -116,7 +143,7 @@ Attenzione al classico errore su S3: **il bucket e i suoi oggetti sono risorse d
 - **Customer managed**: scritte da noi, riutilizzabili su più identità.
 - **Inline**: scritte dentro una singola identità, nascono e muoiono con essa.
 
-**Resource-based policy**: attaccata a una risorsa (bucket policy su S3, key policy su KMS, trust policy di un role). Dice *chi può fare cosa su questa risorsa*. Ha il campo `Principal`.
+**Resource-based policy**: attaccata a una risorsa (bucket policy su S3, key policy su KMS, il servizio delle chiavi di cifratura che vedremo nella dispensa 6, trust policy di un role). Dice *chi può fare cosa su questa risorsa*. Ha il campo `Principal`.
 
 **Perché ci sono due posti?** Perché la risorsa può voler porre condizioni sue. Un bucket può dire "accetto richieste solo da questo VPC endpoint" indipendentemente da quanto siano larghi i permessi di chi chiede.
 
@@ -196,7 +223,8 @@ Il principio è semplice: **dare solo i permessi necessari, solo sulle risorse n
 
 Strumenti che aiutano:
 
-- **IAM Access Analyzer** segnala risorse condivise all'esterno dell'account e può generare una policy a partire dalle azioni effettivamente usate, lette da CloudTrail.
+- **CloudTrail** è il registro delle chiamate API dell'account: per ogni operazione annota chi l'ha fatta, cosa, quando e da dove. È sempre attivo; in console, **CloudTrail → Event history** mostra gli ultimi 90 giorni di operazioni di gestione (creare, modificare, cancellare risorse, assumere role). Le singole letture e scritture di file su S3 sono *data event* e non compaiono lì: per registrarle serve un *trail* dedicato, che vediamo nell'appendice.
+- **IAM Access Analyzer** analizza le policy e segnala le risorse accessibili dall'esterno dell'account. Può anche generare una policy a partire dalle azioni effettivamente usate, lette da CloudTrail.
 - **Last accessed**: nella console IAM, per ogni role, mostra quali servizi ha davvero usato e quando. Quello che non si usa da mesi si toglie.
 
 ---
@@ -239,7 +267,11 @@ IAM è globale e le modifiche impiegano qualche secondo a propagarsi. Può capit
 
 Obiettivo: creare un role con permessi minimi su un bucket, assumerlo dalla CLI e verificare cosa è consentito, cosa è negato implicitamente e cosa è negato esplicitamente.
 
-Si riparte dal progetto della dispensa 0 (bucket `aws_s3_bucket.demo`).
+### Prima di iniziare
+
+- Si lavora nella **stessa cartella** `infra/` della dispensa 0: aggiungi il file `iam.tf` accanto a `main.tf`. Terraform legge tutti i `.tf` insieme, quindi `iam.tf` può usare il bucket `aws_s3_bucket.demo` definito in `main.tf`.
+- La dispensa 0 finiva con un `destroy`: il bucket non esiste più. Nessun problema: l'`apply` di questa dispensa ricrea bucket, file e role tutti insieme.
+- Rinnova il login: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
 
 ### iam.tf
 
@@ -254,8 +286,9 @@ resource "aws_s3_object" "release" {
 }
 
 # TRUST: chi può assumere il role.
-# "...:root" significa: qualunque identità di questo account
-# che abbia a sua volta il permesso sts:AssumeRole.
+# "...:root" NON è l'utente root: significa "l'account intero", cioè
+# qualunque identità di questo account che abbia a sua volta il permesso
+# sts:AssumeRole (il tuo AdministratorAccess ce l'ha).
 data "aws_iam_policy_document" "trust" {
   statement {
     effect  = "Allow"
@@ -309,7 +342,13 @@ resource "aws_iam_role_policy_attachment" "reader" {
   role       = aws_iam_role.reader.name
   policy_arn = aws_iam_policy.reader.arn
 }
+```
 
+### outputs.tf (aggiunta)
+
+In fondo a `outputs.tf`, sotto gli output della dispensa 0:
+
+```hcl
 output "reader_role_arn" {
   value = aws_iam_role.reader.arn
 }
@@ -321,7 +360,7 @@ Il file contiene due tipi di blocchi: i `data` **non creano niente**, servono a 
 
 **`data.aws_caller_identity.current`** chiede ad AWS "chi sono?" e restituisce l'account in uso. Il blocco è vuoto perché non ci sono parametri da passare. L'attributo che ci serve è `account_id`, per esempio `123456789012`.
 
-**`aws_s3_object.release`** carica un file nel bucket della dispensa 0: `bucket` dice dove, `key` è il percorso del file dentro il bucket, `content` è il testo del file. Ci serve solo per avere qualcosa da leggere nelle prove.
+**`aws_s3_object.release`** carica un file nel bucket della dispensa 0: `bucket` dice dove, `key` è la chiave del file (il nome completo, con il prefisso `releases/`), `content` è il testo del file. Ci serve solo per avere qualcosa da leggere nelle prove.
 
 **`data.aws_iam_policy_document.trust`** e **`data.aws_iam_policy_document.reader`** non creano niente su AWS: prendono i blocchi HCL e producono il **testo JSON** della policy, che trovi nell'attributo `.json`. Ogni pezzo HCL corrisponde a un campo JSON della sezione 3:
 
@@ -333,7 +372,7 @@ Il file contiene due tipi di blocchi: i `data` **non creano niente**, servono a 
 | `actions = [...]` | `"Action"` |
 | `resources = [...]` | `"Resource"` |
 | blocco `principals { type = "AWS", identifiers = [...] }` | `"Principal": { "AWS": [...] }` |
-| blocco `condition { test, variable, values }` | `"Condition": { test: { variable: values } }` |
+| blocco `condition { test = "StringLike", variable = "s3:prefix", values = ["releases/*"] }` | `"Condition": { "StringLike": { "s3:prefix": ["releases/*"] } }` |
 
 Per esempio, il documento `trust` produce questo JSON:
 
@@ -380,36 +419,54 @@ flowchart LR
 
 Per vedere il JSON che Terraform ha generato, dopo l'`apply` apri `terraform console` e scrivi `data.aws_iam_policy_document.reader.json`.
 
+### Applicare
+
+`terraform plan`, poi `terraform apply` (conferma con `yes`). Alla fine, tra gli output, compare `reader_role_arn`.
+
 ### Configurare la CLI per assumere il role
 
-Dopo `terraform apply`, aggiungi al file `~/.aws/config` un profilo che assume il role partendo dal tuo profilo SSO:
+Ora creiamo un secondo profilo della CLI, `lab-reader`, che parte dalle tue credenziali SSO (profilo `corso`) e assume il role appena creato. È il file `~/.aws/config` che ha scritto `aws configure sso` nella dispensa 0 (`/Users/tuonome/.aws/config` su Mac, `C:\Users\tuonome\.aws\config` su Windows). Aprilo con un editor di testo, per esempio `nano ~/.aws/config`, e aggiungi **in fondo**:
 
 ```ini
 [profile lab-reader]
-role_arn       = <valore di reader_role_arn>
+role_arn       = arn:aws:iam::123456789012:role/corso-aws-artifact-reader
 source_profile = corso
+region         = eu-south-1
 ```
 
+Al posto dell'ARN di esempio incolla il tuo, che ottieni con `terraform output -raw reader_role_arn` (dalla cartella del progetto). `source_profile = corso` significa "per chiedere il role usa le credenziali del profilo `corso`".
+
 ### Prove
+
+Ogni comando `aws s3` corrisponde a un'azione IAM. È questa l'azione che IAM controlla:
+
+| Comando | Azione IAM | Nella nostra policy |
+|---|---|---|
+| `aws s3 ls s3://bucket/prefisso/` | `s3:ListBucket` | Allow, solo con prefisso `releases/` |
+| `aws s3 cp s3://bucket/file -` (scarica) | `s3:GetObject` | Allow su `releases/*` |
+| `aws s3 cp file s3://bucket/file` (carica) | `s3:PutObject` | Non citata: deny implicito |
+| `aws s3 rm s3://bucket/file` | `s3:DeleteObject` | Deny esplicito |
+
+Due note di sintassi. `BUCKET=$(terraform output -raw bucket_name)` esegue il comando tra parentesi e salva il risultato nella variabile di shell `BUCKET`: è il nome del bucket, letto dall'output `bucket_name` della dispensa 0. Si lancia dalla cartella del progetto e, se apri un nuovo terminale, va ripetuto. Poi `$BUCKET` viene sostituito dal nome. Il `-` finale di `aws s3 cp` significa "stampa il contenuto a video invece di salvarlo in un file".
 
 ```bash
 BUCKET=$(terraform output -raw bucket_name)
 
 # 1. Chi sono adesso?
 aws sts get-caller-identity --profile lab-reader
-#    Atteso: un ARN "assumed-role/...-artifact-reader/..."
+#    Atteso: "Arn": "arn:aws:sts::123456789012:assumed-role/corso-aws-artifact-reader/botocore-session-..."
 
 # 2. Lettura del file di release
 aws s3 cp s3://$BUCKET/releases/app-v1.0.txt - --profile lab-reader
-#    Atteso: "versione 1.0"
+#    Atteso: versione 1.0
 
 # 3. Elenco di releases/
 aws s3 ls s3://$BUCKET/releases/ --profile lab-reader
-#    Atteso: funziona
+#    Atteso: una riga con data, dimensione e app-v1.0.txt
 
 # 4. Elenco della radice del bucket
 aws s3 ls s3://$BUCKET/ --profile lab-reader
-#    Atteso: AccessDenied (la condition limita il prefisso)
+#    Atteso: AccessDenied (il prefisso richiesto è vuoto, non corrisponde a releases/*)
 
 # 5. Scrittura
 echo test > test.txt
@@ -421,15 +478,24 @@ aws s3 rm s3://$BUCKET/releases/app-v1.0.txt --profile lab-reader
 #    Atteso: AccessDenied, deny ESPLICITO
 ```
 
+Se la prova 1 fallisce subito dopo l'`apply`, aspetta qualche secondo e riprova: è la consistenza eventuale di IAM (sezione 8).
+
 ### Domande di verifica
 
-1. Confronta i messaggi di errore dei punti 5 e 6: cosa cambia?
-2. Aggiungi temporaneamente al role la policy AWS managed `AmazonS3FullAccess` e ripeti i punti 5 e 6. Cosa succede adesso e perché? (Atteso: la scrittura passa, la cancellazione resta negata: il Deny esplicito vince.) Poi togli la policy.
-3. Perché al punto 4 viene negato l'elenco della radice ma non la lettura del file?
-4. Nella trust policy, cosa cambierebbe se al posto di `...:root` mettessi `Service = "ec2.amazonaws.com"`? Potresti ancora assumere il role dalla CLI?
-5. Cerca in CloudTrail (Event history) gli eventi `AssumeRole` e `GetObject` generati dalle prove. Riesci a risalire da chi ha assunto il role a cosa ha fatto?
+1. Confronta i messaggi di errore dei punti 5 e 6: cosa cambia? (Suggerimento: cerca in fondo al messaggio *"no identity-based policy allows"*, deny implicito, contro *"explicit deny in an identity-based policy"*, deny esplicito.)
+2. Aggiungi temporaneamente al role la policy AWS managed `AmazonS3FullAccess`, usando il tuo profilo amministratore:
 
-Alla fine: `terraform destroy`.
+   ```bash
+   aws iam attach-role-policy --profile corso --role-name corso-aws-artifact-reader \
+     --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
+   ```
+
+   Ripeti i punti 5 e 6. Cosa succede adesso e perché? (Atteso: la scrittura passa, la cancellazione resta negata: il Deny esplicito vince.) Poi togli la policy con lo stesso comando, scrivendo `detach-role-policy` al posto di `attach-role-policy`. Se la dimentichi attaccata, il `terraform destroy` non riesce a cancellare il role.
+3. Perché al punto 4 viene negato l'elenco della radice ma non la lettura del file?
+4. Nella trust policy, cosa cambierebbe se nel blocco `principals` mettessi `type = "Service"` e `identifiers = ["ec2.amazonaws.com"]` (il JSON della sezione 6)? Potresti ancora assumere il role dalla CLI?
+5. In console apri **CloudTrail → Event history** (regione Milano) e filtra per *Event name* = `AssumeRole`. Trovi le assunzioni del role fatte dalle prove? Chi le ha fatte? (La lettura del file, `GetObject`, qui non la vedi: è un *data event*, sezione 7.)
+
+Alla fine: `terraform destroy`. Il file `releases/test.txt` caricato alla domanda 2 non è gestito da Terraform, ma `force_destroy = true` sul bucket (dispensa 0) fa sì che venga cancellato insieme al bucket.
 
 ---
 

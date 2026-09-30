@@ -43,7 +43,7 @@ flowchart TB
     PRIVB <-.->|"solo traffico interno"| DBB
 ```
 
-Tre livelli, ciascuno duplicato su due AZ: le subnet pubbliche parlano con internet, le private escono solo tramite il NAT, le database non escono affatto. Nella versione da laboratorio c'è un solo NAT (nella AZ-a); in produzione ce n'è uno per AZ.
+**EC2** è il servizio AWS dei server virtuali (dispensa 5), **RDS** quello dei database gestiti (dispensa 6); una **AZ** (Availability Zone) è un data center della regione (sezione 3). Tre livelli, ciascuno duplicato su due AZ: le subnet pubbliche parlano con internet, le private escono solo tramite il NAT, le database non escono affatto. Nella versione da laboratorio c'è un solo NAT (nella AZ-a); in produzione ce n'è uno per AZ.
 
 Caratteristiche da ricordare:
 
@@ -54,9 +54,30 @@ Caratteristiche da ricordare:
 
 ## 2. Gli indirizzi: CIDR
 
-### La notazione
+### Cos'è un indirizzo IP
 
-Un blocco di indirizzi si scrive in notazione **CIDR**: un indirizzo seguito da `/n`, dove `n` dice quanti bit sono fissi. Più il numero è piccolo, più il blocco è grande.
+Ogni dispositivo in rete (un server, un database, il tuo portatile) ha un **indirizzo IP**, che funziona come un numero civico: serve agli altri per mandargli dati. Un indirizzo IP (versione 4, quella che usiamo) è fatto di **4 numeri da 0 a 255** separati da punti, per esempio `10.20.1.5`.
+
+Dietro le quinte ogni numero occupa 8 **bit** (cifre binarie, 0 o 1), quindi un indirizzo intero è lungo 32 bit. Serve saperlo solo per capire la notazione qui sotto.
+
+I dati viaggiano in **pacchetti**, e ogni pacchetto porta scritti due indirizzi, come una busta: il **mittente** (sorgente) e il **destinatario** (destinazione).
+
+### IP pubblici e IP privati
+
+- Gli **IP pubblici** sono unici al mondo e raggiungibili da internet, come l'indirizzo di un sito web.
+- Gli **IP privati** stanno in tre intervalli riservati (definiti in un documento chiamato RFC 1918): quelli che iniziano con `10.`, quelli da `172.16.` a `172.31.` e quelli che iniziano con `192.168.`. Chiunque può usarli dentro la propria rete (la rete di casa usa quasi sempre `192.168.x.x`), ma internet non li trasporta: un pacchetto con destinazione `10.20.1.5` non arriva da nessuna parte su internet. Per uscire serve qualcuno che li "traduca" in un IP pubblico (il NAT, sezione 5).
+
+Tutto il nostro VPC usa IP privati.
+
+### La notazione CIDR
+
+Un blocco di indirizzi si scrive in notazione **CIDR**: un indirizzo seguito da `/n`, dove `n` dice quanti bit, partendo da sinistra, sono **fissi**. I bit restanti (`32 − n`) sono liberi, e il blocco contiene 2 elevato a `32 − n` indirizzi. Più il numero è piccolo, più il blocco è grande.
+
+In pratica, dato che ogni numero dell'indirizzo vale 8 bit:
+
+- `/16` fissa i primi **due** numeri: `10.20.0.0/16` è "tutti gli indirizzi `10.20.x.x`", cioè da `10.20.0.0` a `10.20.255.255` (256 × 256 = 65.536 indirizzi);
+- `/24` fissa i primi **tre** numeri: `10.20.1.0/24` è "tutti gli indirizzi `10.20.1.x`" (256 indirizzi);
+- `/0` non fissa niente: `0.0.0.0/0` è "**qualunque** indirizzo".
 
 | CIDR | Indirizzi | Uso tipico |
 |---|---|---|
@@ -65,7 +86,7 @@ Un blocco di indirizzi si scrive in notazione **CIDR**: un indirizzo seguito da 
 | `/24` | 256 | Una subnet normale |
 | `/28` | 16 | La subnet più piccola ammessa |
 
-Esempio: `10.20.0.0/16` significa "tutti gli indirizzi da `10.20.0.0` a `10.20.255.255`".
+Una **subnet** (sottorete) è un pezzo del blocco del VPC: per esempio `10.20.1.0/24` è una fetta di `10.20.0.0/16`.
 
 ### Gli indirizzi che AWS si tiene
 
@@ -73,11 +94,11 @@ In **ogni subnet** AWS riserva 5 indirizzi: i primi quattro e l'ultimo. In una `
 
 | Indirizzo | Riservato per |
 |---|---|
-| `10.20.1.0` | Indirizzo di rete |
-| `10.20.1.1` | Router del VPC |
-| `10.20.1.2` | DNS di AWS |
+| `10.20.1.0` | Indirizzo di rete: il "nome" del blocco stesso, non assegnabile |
+| `10.20.1.1` | Router del VPC: il componente che smista i pacchetti secondo la route table (sezione 4) |
+| `10.20.1.2` | DNS di AWS: la "rubrica" che traduce nomi in indirizzi (sezione 6) |
 | `10.20.1.3` | Uso futuro di AWS |
-| `10.20.1.255` | Broadcast (non supportato, ma riservato) |
+| `10.20.1.255` | Broadcast, cioè "manda a tutti": AWS non lo supporta, ma tiene comunque l'indirizzo |
 
 Una `/24` ha quindi **251** indirizzi utilizzabili, non 256.
 
@@ -85,9 +106,9 @@ Una `/24` ha quindi **251** indirizzi utilizzabili, non 256.
 
 Il CIDR di un VPC non si cambia a cuor leggero: cambiarlo in Terraform significa **distruggere e ricreare tutta la rete** e tutto quello che ci sta sopra. Si pianifica una volta, bene. Le regole:
 
-- Usare gli intervalli privati (RFC 1918): `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`.
-- **Non sovrapporsi** a nessuna rete con cui un giorno si dovrà comunicare: altri VPC, la rete aziendale on-premise, e il **CIDR dei client VPN** (dispensa 4).
-- **Evitare le reti di casa**: `192.168.0.0/24` e `192.168.1.0/24` sono i default di quasi tutti i router domestici. Se il VPC le usa, chi si collega in VPN da casa avrà conflitti di routing.
+- Usare gli intervalli privati: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`.
+- **Non sovrapporsi** a nessuna rete con cui un giorno si dovrà comunicare: altri VPC, la rete aziendale *on-premise* (quella fisica dell'azienda, negli uffici o nel suo data center) e il **CIDR dei client VPN**. La VPN è il collegamento cifrato che fa "entrare" il tuo PC nella rete del VPC; la vediamo nella dispensa 4. Il motivo: se due reti collegate usano gli stessi indirizzi, per un indirizzo come `192.168.1.10` il computer non sa più se mandare il pacchetto da una parte o dall'altra.
+- **Evitare le reti di casa**: `192.168.0.0/24` e `192.168.1.0/24` sono i default di quasi tutti i router domestici. Se il VPC le usa, chi si collega in VPN da casa avrà esattamente quel conflitto.
 - Lasciare spazio per crescere: meglio subnet `/24` in un VPC `/16` che riempire tutto subito.
 
 ### Il piano del corso
@@ -95,7 +116,7 @@ Il CIDR di un VPC non si cambia a cuor leggero: cambiarlo in Terraform significa
 | Blocco | CIDR | Note |
 |---|---|---|
 | VPC | `10.20.0.0/16` | |
-| Pubblica AZ-a | `10.20.0.0/24` | NAT, eventuali load balancer |
+| Pubblica AZ-a | `10.20.0.0/24` | NAT Gateway (sezione 5) |
 | Pubblica AZ-b | `10.20.1.0/24` | |
 | Privata AZ-a | `10.20.10.0/24` | Applicazione (EC2) |
 | Privata AZ-b | `10.20.11.0/24` | |
@@ -123,7 +144,9 @@ Questo è il concetto che sblocca tutto il resto:
 
 > **Una subnet non è pubblica o privata per un'impostazione. Lo è per la sua route table.**
 
-Ogni subnet è associata a una **route table**, cioè un elenco di regole "per questa destinazione, vai di qua". Ogni route table contiene sempre una rotta **local** per il CIDR del VPC: è quella che permette a tutte le subnet di parlarsi tra loro, e non si può togliere.
+Ogni subnet è associata a una **route table**, cioè un elenco di **rotte**. Una rotta dice: "i pacchetti diretti a questo blocco di indirizzi mandali a questo *gateway*" (un gateway è una "porta" verso un'altra rete). Ogni route table contiene sempre una rotta **local** per il CIDR del VPC: è quella che permette a tutte le subnet di parlarsi tra loro, e non si può togliere.
+
+La rotta `0.0.0.0/0` significa "qualunque indirizzo", cioè "tutto il resto". Se un indirizzo corrisponde a più rotte, **vince la più specifica** (il `/n` più grande): un pacchetto per `10.20.11.7` corrisponde sia a `10.20.0.0/16` sia a `0.0.0.0/0`, e segue la rotta `local` perché `/16` è più specifico di `/0`. Così il traffico interno resta interno e solo quello verso l'esterno segue `0.0.0.0/0`.
 
 Poi, a seconda delle altre rotte:
 
@@ -149,7 +172,11 @@ Una subnet senza associazione esplicita finisce sulla **main route table** del V
 
 ### IP pubblico: la seconda condizione
 
-Per essere raggiungibile da internet, una risorsa in una subnet pubblica deve anche avere un **IP pubblico** (assegnato automaticamente o un Elastic IP). L'opzione `map_public_ip_on_launch` della subnet dà un IP pubblico a ogni istanza avviata lì. Noi la lasciamo **disattivata** anche sulle subnet pubbliche: lì ci va solo il NAT, che usa un suo Elastic IP. Nessuna istanza deve ritrovarsi esposta per sbaglio.
+Per essere raggiungibile da internet, una risorsa in una subnet pubblica deve anche avere un **IP pubblico**. Ce ne sono di due tipi: quello **automatico**, che AWS assegna all'avvio e che cambia se il server viene spento e riacceso, e l'**Elastic IP**, un IP pubblico fisso che riservi al tuo account finché non lo rilasci.
+
+Attenzione: in una subnet pubblica una risorsa **senza** IP pubblico non riesce nemmeno a **uscire** su internet. L'Internet Gateway traduce infatti solo gli indirizzi delle risorse che ne hanno uno pubblico. Per uscire senza IP pubblico serve una subnet privata con il NAT.
+
+L'opzione `map_public_ip_on_launch` della subnet dà un IP pubblico a ogni istanza avviata lì. Noi la lasciamo **disattivata** anche sulle subnet pubbliche: lì ci va solo il NAT, che usa un suo Elastic IP. Nessuna istanza deve ritrovarsi esposta per sbaglio.
 
 C'è poi una terza condizione: anche con rotta e IP pubblico, il traffico deve essere ammesso dai **firewall** del VPC. Sono l'argomento della dispensa 3. In questa dispensa ci occupiamo solo di **dove** il traffico può andare; nella prossima, di **cosa** può passare.
 
@@ -163,7 +190,11 @@ C'è poi una terza condizione: anche con rotta e IP pubblico, il traffico deve e
 
 ### NAT Gateway
 
-Permette alle risorse delle subnet private di **iniziare** connessioni verso internet (aggiornamenti di sistema, download di pacchetti, chiamate ad API esterne) senza poter essere contattate da fuori. Tutto il traffico in uscita appare come proveniente dall'**Elastic IP** del NAT: utile quando un fornitore esterno chiede di mettere in whitelist i tuoi indirizzi.
+**NAT** sta per *Network Address Translation*, traduzione di indirizzi. Il NAT Gateway permette alle risorse delle subnet private, che hanno solo IP privati, di **iniziare** connessioni verso internet (aggiornamenti di sistema, download di pacchetti, chiamate ad API esterne) senza poter essere contattate da fuori.
+
+Come fa: su ogni pacchetto in uscita sostituisce il mittente privato (es. `10.20.10.5`) con il proprio IP pubblico, e si annota la connessione. Quando arriva la risposta, guarda gli appunti e la gira al server giusto. Un pacchetto che arriva da fuori **senza** essere la risposta a una connessione annotata non corrisponde a nessun appunto, e viene scartato.
+
+Tutto il traffico in uscita appare quindi come proveniente dall'**Elastic IP** del NAT. È utile quando un fornitore esterno accetta solo richieste da un elenco di indirizzi autorizzati (una *whitelist*): gli basta autorizzare quell'unico IP.
 
 Il percorso di una connessione, e perché dall'esterno non si entra:
 
@@ -186,7 +217,7 @@ Da sapere:
 
 - Il NAT Gateway **sta in una subnet pubblica**, perché lui stesso esce tramite l'Internet Gateway.
 - Vive in **una sola AZ**. Se quella AZ ha un problema, le subnet private che lo usano perdono l'uscita verso internet.
-- **Costa**: si paga a ore, anche quando è fermo, più il traffico che lo attraversa. Nei laboratori va distrutto a fine giornata.
+- **Costa**: si paga a ore, anche quando non passa traffico, più ogni GB che lo attraversa. Indicativamente circa 0,05 $ l'ora, cioè oltre 35 $ al mese se resta acceso, più l'Elastic IP (circa 0,005 $ l'ora); controlla i prezzi aggiornati di Milano sulla pagina prezzi di AWS. Nei laboratori va distrutto a fine giornata.
 
 Da qui la scelta di progetto:
 
@@ -203,7 +234,9 @@ Nella dispensa su S3 vedremo anche i **VPC endpoint**, che permettono di raggiun
 
 ## 6. Un'impostazione da non dimenticare: il DNS
 
-Due opzioni del VPC, `enable_dns_support` e `enable_dns_hostnames`, vanno **entrambe attive**. Senza, non funzionano la risoluzione degli endpoint di RDS, i VPC endpoint e SSM Session Manager. È un errore che si scopre tardi, con sintomi che sembrano tutt'altro.
+Il **DNS** è la rubrica della rete: traduce un nome (es. `corso-db.xxxx.eu-south-1.rds.amazonaws.com`) nell'indirizzo IP da contattare. Nessuno scrive gli IP a mano: i servizi AWS si raggiungono per nome.
+
+Due opzioni del VPC vanno **entrambe attive**: `enable_dns_support` accende la risoluzione dei nomi dentro il VPC, `enable_dns_hostnames` dà un nome DNS alle risorse. Senza, non funzionano il nome del database RDS (dispensa 6), l'accesso ai server con SSM Session Manager (dispensa 5) e i VPC endpoint (dispensa 7). È un errore che si scopre tardi, con sintomi che sembrano tutt'altro.
 
 Il VPC nasce anche con un **Security Group** e una **NACL** di default. Non li tocchiamo qui: sono firewall, e li vediamo nella dispensa 3, dove si spiega anche perché il Security Group di default va svuotato.
 
@@ -211,9 +244,9 @@ Il VPC nasce anche con un **Security Group** e una **NACL** di default. Non li t
 
 ## 7. VPC Flow Logs (facoltativo, ma consigliato)
 
-I **Flow Logs** registrano i metadati di ogni connessione: sorgente, destinazione, porte, protocollo, byte e se è stata accettata o rifiutata. Non il contenuto, solo "chi ha parlato con chi".
+I **Flow Logs** registrano i metadati di ogni connessione: sorgente, destinazione, porte, protocollo, byte e se è stata accettata o rifiutata. La **porta** è il numero che indica a quale servizio è diretta una connessione (443 per i siti HTTPS, 5432 per PostgreSQL); il **protocollo** è il tipo di traffico (TCP, UDP). Le vediamo meglio nella dispensa 3. I Flow Logs non registrano il contenuto, solo "chi ha parlato con chi".
 
-Servono per il troubleshooting ("perché questa connessione non passa?") e sono una fonte fondamentale per la sicurezza: rilevazione di scansioni, esfiltrazioni, movimenti laterali. Si possono inviare a CloudWatch Logs o a S3; S3 è più economico per la conservazione.
+Servono per il troubleshooting ("perché questa connessione non passa?") e sono una fonte fondamentale per la sicurezza. Permettono di scoprire scansioni (qualcuno che prova una porta dopo l'altra), esfiltrazioni (dati copiati fuori di nascosto) e movimenti laterali (un attaccante che da un server compromesso prova a raggiungerne altri). Si possono inviare a CloudWatch Logs o a S3; S3 è più economico per la conservazione.
 
 Una nota pratica: quando si abilitano i Flow Logs verso un bucket S3, AWS aggiunge da solo una bucket policy per poterci scrivere. Se in futuro la bucket policy di quel bucket sarà gestita da Terraform, va scritta includendo quei permessi, altrimenti i due si sovrascrivono a vicenda. Per questo si usa un bucket dedicato ai log.
 
@@ -255,7 +288,7 @@ Sono i nomi che vedrai nel `plan` e in `terraform state list`. Da qui derivano t
 
 - **Una copia si legge con la chiave tra parentesi quadre**: `aws_subnet.esempio["eu-south-1a"].id`.
 - **Senza parentesi quadre ottieni tutte le copie**, come mappa: `aws_subnet.esempio` è `{ "eu-south-1a" = <subnet>, "eu-south-1b" = <subnet> }`. E una mappa si può dare in pasto al `for_each` di un'altra risorsa: così si crea, per esempio, un'associazione per ogni subnet.
-- **`for_each` accetta una mappa o un set di stringhe**, non una lista. Una lista si converte con `toset(lista)`: in un set chiave e valore coincidono, quindi `each.key == each.value`.
+- **`for_each` accetta una mappa o un set di stringhe**, non una lista. Un **set** è come una lista, ma senza ordine e senza doppioni: `toset(["a", "b", "a"])` dà `["a", "b"]`. Non avendo posizioni, ogni elemento si identifica con il suo valore, quindi in un `for_each` su un set `each.key` ed `each.value` coincidono.
 
 Esiste anche `count = 3`, che crea copie numerate `[0]`, `[1]`, `[2]`. È più semplice, ma se togli l'elemento `[0]` tutti gli altri scalano di posizione e Terraform li distrugge e ricrea. Con `for_each` ogni copia ha un nome stabile (la AZ), quindi aggiungere o togliere una AZ tocca **solo** quella.
 
@@ -282,7 +315,7 @@ Su una mappa le due variabili sono chiave e valore: `{for k, v in mappa : k => v
 cidrsubnet(prefisso, bit_aggiuntivi, numero)
 ```
 
-Prende un blocco, lo divide aggiungendo bit e restituisce il blocco numero `n`. Da una `/16` aggiungendo 8 bit si ottengono delle `/24`:
+Prende un blocco, lo divide aggiungendo bit e restituisce il blocco numero `n`. Da una `/16` aggiungendo 8 bit si ottengono delle `/24`: 2⁸ = 256 blocchi, numerati da 0 a 255. Il numero `n` finisce nel terzo numero dell'indirizzo:
 
 ```hcl
 cidrsubnet("10.20.0.0/16", 8, 0)    # 10.20.0.0/24
@@ -331,6 +364,8 @@ Le tre variabili sono i soli "comandi" della rete: tutto il resto si calcola da 
 - per `az_count`, `&&` significa "e": il numero deve essere almeno 2 **e** al massimo 3.
 
 ### vpc.tf
+
+Un file nuovo nella cartella `infra/`, accanto a quelli delle dispense 0 e 1. I `locals` stanno qui e non in un `locals.tf` separato perché riguardano solo la rete: in `locals.tf` vanno i valori usati da più file.
 
 ```hcl
 # ---------------------------------------------------------------
@@ -549,6 +584,8 @@ Perché **una route table privata per AZ** anche quando il NAT è uno solo? Perc
 
 ### flowlogs.tf (facoltativo)
 
+Per attivare i Flow Logs basta creare questo file; se non lo crei, non esistono. Contiene un bucket dedicato ai log, il blocco dell'accesso pubblico al bucket (i quattro `true` chiudono ogni possibile via per renderlo pubblico: lo approfondiamo nella dispensa 7) e il flow log vero e proprio, che dice "registra tutto il traffico del VPC e scrivilo in quel bucket".
+
 ```hcl
 resource "aws_s3_bucket" "flow_logs" {
   bucket        = "${var.project}-flowlogs-${data.aws_caller_identity.current.account_id}"
@@ -606,26 +643,50 @@ Gli output usano le espressioni `for` per trasformare le mappe di risorse in qua
 
 Obiettivo: creare il VPC a tre livelli, verificare che le route table facciano quello che dicono, e osservare come reagisce il plan a modifiche di diverso peso.
 
+### Prima di iniziare
+
+- Si lavora nella stessa cartella `infra/` delle dispense 0 e 1. Aggiungi le tre variabili in fondo a `variables.tf`, crea `vpc.tf` (e, se vuoi, `flowlogs.tf`) e aggiungi gli output in fondo a `outputs.tf`.
+- La dispensa 1 finiva con un `destroy`: il `plan` ricreerà anche bucket, file e role delle dispense precedenti. È normale.
+- Rinnova il login: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
+
 ### Passi
 
-1. **Prima di tutto, `terraform console`.** Prova `cidrsubnet("10.20.0.0/16", 8, 20)` e `local.subnets`. Corrispondono alla tabella della sezione 2?
-2. **`terraform plan`.** Conta le risorse per tipo: quante subnet, quante route table, quante associazioni, quanti NAT? Spiega ogni numero a partire da `az_count = 2` e `single_nat_gateway = true`.
-3. **`terraform apply`.** Il NAT Gateway richiede qualche minuto: è normale.
+1. **Prova `cidrsubnet` in `terraform console`.** Scrivi `cidrsubnet("10.20.0.0/16", 8, 20)` e poi `cidrsubnet("10.20.0.0/16", 8, 11)`. Corrispondono al piano della sezione 2? (Atteso: `10.20.20.0/24` e `10.20.11.0/24`.) Esci con `exit`.
+2. **`terraform plan`.** Conta le risorse **della rete** per tipo: quante subnet, quante route table, quante rotte, quante associazioni, quanti NAT ed Elastic IP? Spiega ogni numero a partire da `az_count = 2` e `single_nat_gateway = true`. (Atteso: 23 risorse di rete, 26 con `flowlogs.tf`, più le 7 ricreate delle dispense 0 e 1.)
+3. **`terraform apply`.** Il NAT Gateway richiede qualche minuto: è normale. Poi riapri `terraform console` e scrivi `local.subnets`: è la mappa della sezione 8 (passo 2 della lettura guidata)?
 4. **Controlla le route table dalla CLI:**
 
    ```bash
-   aws ec2 describe-route-tables \
+   aws ec2 describe-route-tables --region eu-south-1 \
      --filters Name=vpc-id,Values=$(terraform output -raw vpc_id) \
      --query 'RouteTables[].{Nome: Tags[?Key==`Name`].Value | [0], Rotte: Routes[].[DestinationCidrBlock, GatewayId || NatGatewayId]}' \
      --output json
    ```
 
+   `--filters` tiene solo le route table del nostro VPC. `--query` sfoltisce la risposta, che altrimenti è lunghissima: per ogni tabella tiene il tag `Name` e, per ogni rotta, la destinazione e il gateway (IGW o NAT). La sintassi è quella di JMESPath, un linguaggio per estrarre pezzi di JSON; non serve impararla. Un pezzo dell'output atteso:
+
+   ```json
+   { "Nome": "corso-aws-rt-public",
+     "Rotte": [["10.20.0.0/16", "local"], ["0.0.0.0/0", "igw-0abc123..."]] }
+   ```
+
+   Vedrai anche una tabella con `"Nome": null`: è la main route table creata da AWS insieme al VPC (sezione 4), che nessuna delle nostre subnet usa.
+
    Per ciascuna route table rispondi: dove porta `0.0.0.0/0`? Quale non ha affatto quella rotta? Cosa significa la rotta con destinazione `10.20.0.0/16` e gateway `local`?
-5. **Passa a un NAT per AZ.** Metti `single_nat_gateway = false` e lancia solo `plan`. Cosa viene creato, cosa viene modificato sul posto (`~`)? Qualcosa viene distrutto?
-6. **Aggiungi una AZ.** Metti `az_count = 3` e lancia solo `plan`. Cosa compare? Le subnet esistenti vengono toccate?
-7. **Cambia il CIDR.** Metti `vpc_cidr = "10.30.0.0/16"` e lancia solo `plan`. Leggi il riepilogo. Perché è la modifica più pericolosa delle tre? Poi annulla.
-8. **Facoltativo:** se hai attivato i Flow Logs, dopo una decina di minuti controlla il bucket: arrivano file? (Con poco traffico nel VPC saranno pochi.)
-9. **`terraform destroy`.** Il NAT Gateway si paga a ore anche da fermo: non lasciarlo acceso.
+
+Nei passi 5, 6 e 7 cambiamo una variabile **solo per un `plan`**, senza toccare i file: l'opzione `-var` dà un valore alla variabile per quel comando soltanto (dispensa 0, sezione 3). Così non c'è niente da ricordarsi di annullare.
+
+5. **Passa a un NAT per AZ.** `terraform plan -var single_nat_gateway=false`. Cosa viene creato, cosa viene modificato sul posto (`~`)? Qualcosa viene distrutto? (Atteso: si aggiungono un Elastic IP e un NAT nella AZ-b; la rotta privata della AZ-b viene modificata sul posto per puntare al nuovo NAT; nessuna distruzione.)
+6. **Aggiungi una AZ.** `terraform plan -var az_count=3`. Cosa compare? Le subnet esistenti vengono toccate? (Atteso: 3 subnet nuove nella AZ-c, più la sua route table privata, la sua rotta e 3 associazioni; le risorse esistenti restano come sono, grazie a `for_each` con chiave la AZ.)
+7. **Cambia il CIDR.** `terraform plan -var vpc_cidr=10.30.0.0/16`. Leggi il riepilogo. Perché è la modifica più pericolosa delle tre? (Atteso: `-/+` sul VPC e su tutto quello che ci sta dentro.)
+8. **Facoltativo:** se hai creato `flowlogs.tf`, dopo una decina di minuti controlla il bucket dei log:
+
+   ```bash
+   aws s3 ls s3://corso-aws-flowlogs-$(aws sts get-caller-identity --query Account --output text)/ --recursive
+   ```
+
+   Arrivano file? (Con poco traffico nel VPC saranno pochi.)
+9. **`terraform destroy`.** Il NAT Gateway si paga a ore anche quando non passa traffico: non lasciarlo acceso.
 
 ### Domande di verifica
 

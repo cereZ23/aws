@@ -4,7 +4,51 @@
 
 ## Obiettivo
 
-Alla fine di questa dispensa sai cos'è l'Infrastructure as Code, sai leggere e scrivere un file Terraform semplice, conosci il ciclo `init → plan → apply → destroy` e sai perché lo **state** è la cosa più delicata di tutto il progetto.
+Alla fine di questa dispensa sai cos'è l'Infrastructure as Code, sai leggere e scrivere un file Terraform semplice, conosci il ciclo `init → plan → apply → destroy` e sai perché lo **state** (il registro di cosa Terraform ha creato, sezione 5) è la cosa più delicata di tutto il progetto.
+
+---
+
+## Prima di iniziare
+
+### Cosa ti serve
+
+| Cosa | Perché | Come verifichi che c'è |
+|---|---|---|
+| Un **account AWS** | È dove nasceranno le risorse | Riesci a entrare nella console web di AWS |
+| **Terraform** 1.10 o successivo | Il programma di questo corso | `terraform version` nel terminale |
+| **AWS CLI** versione 2 | Il programma a riga di comando di AWS: Terraform usa le sue credenziali | `aws --version` nel terminale |
+| Un **editor di testo** (es. VS Code) | Per scrivere i file `.tf` | – |
+| Un **terminale** | Per lanciare i comandi | Su macOS "Terminale", su Windows "PowerShell" |
+
+Terraform e AWS CLI si installano seguendo le istruzioni ufficiali per il tuo sistema operativo (cerca "install terraform" e "install aws cli v2"). Tutti i comandi `terraform` si lanciano **dal terminale, dentro la cartella che contiene i file `.tf`**.
+
+I comandi di esempio sono scritti per macOS e Linux. Su Windows (PowerShell) quasi tutti funzionano uguali; l'eccezione principale è `export NOME=valore`, che diventa `$env:NOME="valore"`.
+
+### Attivare la regione di Milano
+
+Nel corso usiamo la **regione** `eu-south-1`, cioè i data center AWS di Milano. Milano è una regione "opt-in": sugli account nuovi è **spenta** e va attivata una volta. In console: clic sul nome dell'account in alto a destra → **Account** → sezione **AWS Regions** → **Europe (Milan)** → **Enable**. L'attivazione richiede qualche minuto. Finché non è attiva, ogni comando verso Milano fallisce con errori poco chiari.
+
+### Quanto costa
+
+Tutti gli esercizi di questa dispensa costano praticamente zero. Nelle dispense successive alcune risorse si pagano a ore (lo segnaliamo ogni volta). Due abitudini da prendere subito:
+
+- chiudere **sempre** un esercizio con `terraform destroy`;
+- impostare un **budget** con avviso via email: console → **Billing and Cost Management** → **Budgets** → **Create budget**, per esempio 10 € al mese.
+
+### Piccolo glossario
+
+Parole che compaiono da subito. Tutte le altre le spieghiamo quando servono.
+
+| Termine | Significato |
+|---|---|
+| **Console AWS** | Il sito web per gestire AWS a mano, con i clic |
+| **Regione** | Una zona geografica con i suoi data center (per noi Milano, `eu-south-1`). Le risorse nascono in una regione precisa: in console, controlla sempre in alto a destra di essere su Milano, altrimenti "non vedi" quello che hai creato |
+| **S3 / bucket** | S3 è il servizio AWS per archiviare file. Un **bucket** è un contenitore di file, con un nome unico al mondo |
+| **ARN** | L'"indirizzo completo" di una risorsa AWS, unico. Es. `arn:aws:s3:::corso-aws-demo-a1b2c3d4` |
+| **Tag** | Etichette `chiave = valore` attaccate a una risorsa, per ritrovarla e per attribuirne i costi |
+| **HCL** | HashiCorp Configuration Language: il linguaggio in cui si scrivono i file `.tf` |
+| **Git / commit** | Git è lo strumento che conserva la storia dei file di testo; fare un *commit* significa salvarne una versione. Nel corso è consigliato, non obbligatorio |
+| **Pipeline / CI** | Un sistema automatico che, a ogni modifica del codice, esegue comandi al posto tuo (test, `terraform plan`…) |
 
 ---
 
@@ -149,7 +193,9 @@ instance_type = var.environment == "prod" ? "m7g.large" : "t4g.micro"
 
 ### Provare senza paura: terraform console
 
-`terraform console` apre un prompt dove puoi scrivere espressioni e vedere il risultato, senza creare né modificare niente. È il modo più rapido per capire un pezzo di codice che non ti torna:
+`terraform console` apre un prompt dove puoi scrivere espressioni e vedere il risultato, senza creare né modificare niente. È il modo più rapido per capire un pezzo di codice che non ti torna.
+
+Si lancia **dentro la cartella del progetto, dopo `terraform init`** (sezione 4). Le funzioni come `upper(...)` funzionano sempre; `var.qualcosa` funziona solo se quella variabile è dichiarata nei file della cartella (l'esempio sotto presuppone `project` ed `environment`, che vedremo nella sezione 3). Si esce con `exit`.
 
 ```
 $ terraform console
@@ -192,16 +238,18 @@ infra/
 
 ```mermaid
 flowchart LR
-    TFV["terraform.tfvars<br/>i valori"] --> VAR["variables.tf<br/>i campi del modulo"]
+    TFV["terraform.tfvars<br/>i valori"] --> VAR["variables.tf<br/>i campi del questionario"]
     VAR --> MAIN["main.tf<br/>usa var.xxx"]
     MAIN --> OUT["outputs.tf<br/>il risultato"]
     PROV["providers.tf<br/>con cosa parlo"] -.-> MAIN
     BACK["backend.tf<br/>dove salvo lo state"] -.-> MAIN
 ```
 
-> **Analogia.** `variables.tf` è un modulo con i campi vuoti ("Nome progetto: ____, Regione: ____"). `terraform.tfvars` è lo stesso modulo compilato. `main.tf` è l'ufficio che lavora sul modulo compilato. `outputs.tf` è la ricevuta che ti danno allo sportello.
+> **Analogia.** `variables.tf` è un questionario con i campi vuoti ("Nome progetto: ____, Regione: ____"). `terraform.tfvars` è lo stesso questionario compilato. `main.tf` è l'ufficio che lavora sul questionario compilato. `outputs.tf` è la ricevuta che ti danno allo sportello.
 
 Vediamo i file uno per uno: cosa contengono, quando cambiano e gli errori tipici.
+
+> **Attenzione: in questa sezione gli esempi servono a mostrare la sintassi, non vanno copiati.** Alcuni citano risorse che costruiremo più avanti (un database, delle istanze). I file esatti da creare per provare sono nell'esercizio, alla sezione 7.
 
 ---
 
@@ -217,7 +265,7 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"   # da dove scaricarlo (registry)
+      source  = "hashicorp/aws"   # da dove scaricarlo: il registry
       version = "~> 6.0"          # qualsiasi 6.x, non 7.0
     }
     random = {
@@ -227,6 +275,8 @@ terraform {
   }
 }
 ```
+
+Il **registry** (registry.terraform.io) è il "negozio" pubblico da cui `terraform init` scarica i provider: `hashicorp/aws` significa "il provider `aws` pubblicato da HashiCorp". `~> 6.0` si legge "dalla 6.0 in su, ma senza passare alla 7": le versioni nuove della stessa serie sono compatibili, un salto di numero principale può rompere il codice.
 
 **I blocchi `provider`** con la configurazione del "driver": regione, tag di default, eventualmente il profilo o il role da assumere.
 
@@ -267,7 +317,7 @@ Contiene solo il blocco `backend`, cioè dove salvare lo state (vedi sezione 5).
 ```hcl
 terraform {
   backend "s3" {
-    bucket       = "corso-aws-tfstate-123456"
+    bucket       = "corso-aws-tfstate-123456789012"   # corso-aws-tfstate-<numero del tuo account>
     key          = "corso/terraform.tfstate"
     region       = "eu-south-1"
     encrypt      = true
@@ -438,7 +488,7 @@ output "db_connection_string" {
 A cosa servono:
 
 - **a te**: dopo l'`apply` vedi subito l'IP, l'endpoint, l'ARN che ti servono, senza cercarli in console;
-- **agli script**: `terraform output -raw bucket_name` restituisce il valore pulito da usare in bash o in una pipeline (lo abbiamo fatto nel laboratorio della dispensa 1);
+- **agli script**: `terraform output -raw bucket_name` restituisce il valore pulito da usare in bash o in una pipeline (lo useremo nel laboratorio della dispensa 1);
 - **ad altri progetti o moduli**: quando il progetto diventa un modulo, gli output sono il modo in cui passa valori al chiamante.
 
 Gli output sensibili vengono nascosti a video, ma come le variabili **sono salvati in chiaro nello state**.
@@ -509,6 +559,12 @@ La regola che non si discute: **ogni ambiente ha il suo state separato**. Un `de
 | `terraform output` | Mostra gli output |
 | `terraform state list` | Elenca le risorse che Terraform conosce |
 
+Cosa aspettarsi a video:
+
+- `init` scarica i provider (la prima volta impiega qualche secondo) e finisce con **"Terraform has been successfully initialized!"**;
+- `apply` e `destroy` mostrano prima il piano e poi chiedono **"Enter a value:"**: scrivi `yes` e premi Invio. Qualunque altra risposta annulla senza fare niente;
+- alla fine `apply` scrive **"Apply complete! Resources: N added, …"** e stampa gli output.
+
 ### Cosa succede davvero con plan e apply
 
 Il `plan` mette a confronto tre cose: quello che hai scritto, quello che Terraform ricorda di aver creato (lo state) e quello che esiste davvero su AWS in quel momento.
@@ -556,29 +612,18 @@ Cose da sapere:
 
 - **Lo state contiene segreti in chiaro** (password di database, chiavi generate). Non va **mai** messo in Git.
 - **Lo state va tenuto remoto**, non sul portatile di qualcuno: se si perde, Terraform "dimentica" l'infrastruttura.
-- **Serve un lock**: se due persone lanciano `apply` insieme, lo state si corrompe.
+- **Serve un lock**, cioè un cartello "occupato": mentre qualcuno lancia `apply`, Terraform blocca lo state e chi arriva dopo deve aspettare. Senza, due `apply` contemporanei possono corrompere lo state.
 - **Non si modifica a mano.** Per spostare o rimuovere risorse dallo state esistono comandi appositi (`terraform state mv`, `terraform state rm`, blocchi `moved` e `import`).
 
-### backend.tf: state remoto su S3 con lock
+### Locale o remoto
 
-```hcl
-terraform {
-  backend "s3" {
-    bucket       = "corso-aws-tfstate-123456"   # bucket dedicato allo state
-    key          = "corso/terraform.tfstate"
-    region       = "eu-south-1"
-    encrypt      = true
-    use_lockfile = true   # lock nativo su S3 (Terraform >= 1.10)
-  }
-}
-```
+Se non c'è nessun `backend.tf`, lo state è **locale**: un file `terraform.tfstate` nella cartella del progetto. Per imparare va bene, e l'esercizio parte così. Per lavorare seriamente lo state va in un bucket S3 (**remoto**) con il `backend.tf` visto nella sezione 3:
 
-Due note:
+- `encrypt = true`: il file dello state viene salvato cifrato;
+- `use_lockfile = true`: il lock è un piccolo file creato accanto allo state nel bucket (serve Terraform 1.10 o successivo). In passato si usava una tabella DynamoDB: la troverai in molti esempi online, ma oggi non serve più;
+- `key`: il percorso del file dello state dentro il bucket.
 
-- Nel blocco `backend` **non si possono usare variabili**: i valori vanno scritti o passati con `terraform init -backend-config=...`.
-- Il bucket dello state è il classico problema dell'uovo e della gallina: non può essere creato dallo stesso codice che lo usa come backend. Si crea una volta a parte (con un piccolo progetto Terraform con state locale, o a mano), con versioning attivo e accesso pubblico bloccato.
-
-In passato il lock si faceva con una tabella DynamoDB: la troverai in molti esempi online, ma oggi con `use_lockfile` non serve più.
+Il bucket dello state è il classico problema dell'uovo e della gallina: non può essere creato dallo stesso codice che lo usa come backend, perché quel codice, per partire, ha già bisogno del bucket. Si crea quindi **una volta sola, a parte**, con la CLI; lo facciamo nel passo 7 dell'esercizio. Poi resta lì per tutto il corso.
 
 ### .gitignore
 
@@ -590,6 +635,8 @@ In passato il lock si faceva con una tabella DynamoDB: la troverai in molti esem
 crash.log
 ```
 
+Il file `.gitignore` va nella stessa cartella dei `.tf` ed elenca i file che Git non deve salvare: qui la cartella dei provider scaricati, lo state e i piani. Se non usi Git puoi ignorarlo.
+
 Il file `.terraform.lock.hcl` invece **va committato**: fissa le versioni esatte dei provider, così tutti usano le stesse.
 
 ### Il drift
@@ -600,14 +647,54 @@ Se qualcuno modifica a mano in console una risorsa gestita da Terraform, il `pla
 
 ## 6. Come si autentica Terraform
 
-Terraform usa le stesse credenziali della CLI di AWS. La strada corretta è l'accesso SSO (IAM Identity Center) con credenziali temporanee:
+Terraform non ha un login suo: usa le stesse credenziali della AWS CLI. La strada corretta è **IAM Identity Center** (il servizio AWS per il *single sign-on*, SSO: un solo login, con credenziali temporanee che scadono da sole). Come funziona lo vediamo nella dispensa 1; qui ci serve solo farlo funzionare.
+
+### Configurazione (una volta sola)
+
+In console, con l'utente con cui hai creato l'account:
+
+1. Cerca **IAM Identity Center** e premi **Enable**. Controlla di essere nella regione di Milano.
+2. **Users → Add user**: crea il tuo utente di lavoro con la tua email. Riceverai un'email per impostare la password; attiva anche l'MFA (il codice dall'app sul telefono) quando te lo propone.
+3. **Permission sets → Create permission set** → *Predefined* → `AdministratorAccess`. Per un laboratorio personale va bene; in azienda i permessi sono più stretti.
+4. **AWS accounts** → seleziona il tuo account → **Assign users or groups** → scegli il tuo utente e il permission set `AdministratorAccess`.
+5. Nella pagina **Dashboard** copia l'**AWS access portal URL** (qualcosa come `https://d-1234567890.awsapps.com/start`).
+
+Nel terminale:
 
 ```bash
-aws configure sso          # una volta, crea il profilo
-aws sso login --profile corso
-export AWS_PROFILE=corso
-aws sts get-caller-identity   # verifica: chi sono?
+aws configure sso
 ```
+
+Il comando fa alcune domande:
+
+| Domanda | Cosa rispondere |
+|---|---|
+| `SSO session name` | `corso` |
+| `SSO start URL` | l'URL copiato al punto 5 |
+| `SSO region` | `eu-south-1` |
+| `SSO registration scopes` | Invio (lascia il valore proposto) |
+
+Si apre il browser: accedi con l'utente del punto 2 e autorizza. Tornato al terminale, scegli l'account e il ruolo `AdministratorAccess`, poi:
+
+| Domanda | Cosa rispondere |
+|---|---|
+| `Default client Region` | `eu-south-1` |
+| `CLI default output format` | `json` |
+| `Profile name` | `corso` |
+
+Il risultato viene scritto nel file `~/.aws/config` (`~` è la tua cartella utente: `/Users/tuonome` su Mac, `C:\Users\tuonome` su Windows). Il **profilo** `corso` è un nome che raggruppa "quale account, quale ruolo, quale regione".
+
+### Ogni giorno
+
+```bash
+aws sso login --profile corso   # apre il browser e rinnova le credenziali (durano alcune ore)
+export AWS_PROFILE=corso         # d'ora in poi, in QUESTO terminale, usa il profilo corso
+aws sts get-caller-identity      # verifica: chi sono?
+```
+
+Su Windows (PowerShell) la seconda riga è `$env:AWS_PROFILE="corso"`. La variabile vale solo per il terminale aperto: se ne apri un altro va ripetuta.
+
+L'ultimo comando deve rispondere con il numero del tuo account e un `Arn` che contiene `AWSReservedSSO_AdministratorAccess`. Se dice che il token è scaduto, rilancia `aws sso login`.
 
 Da **non** fare mai:
 
@@ -615,15 +702,84 @@ Da **non** fare mai:
 - access key permanenti di un utente IAM salvate sul portatile "perché è più comodo";
 - usare l'utente root dell'account.
 
-Questo tema si approfondisce nella dispensa 1.
+Chi è autorizzato a fare cosa, e perché, è il tema della dispensa 1.
 
 ---
 
 ## 7. Esercizio
 
-Obiettivo: creare un bucket, modificarlo, forzarne la ricreazione e distruggerlo, leggendo ogni volta il plan.
+Obiettivo: creare un bucket, modificarlo, forzarne la ricreazione, spostare lo state su S3 e distruggere tutto, leggendo ogni volta il plan.
 
-Per l'esercizio `variables.tf` deve dichiarare solo `region` e `project` (gli esempi `environment` e `db_password` della sezione 3 non servono qui), e `terraform.tfvars` contiene solo `project = "corso-aws"`.
+### Prepara la cartella
+
+Crea una cartella vuota, per esempio `infra/`, e dentro **esattamente** questi cinque file. Questa cartella è il progetto del corso: le dispense successive aggiungeranno altri file qui, accanto a questi. Gli esempi della sezione 3 non vanno copiati.
+
+```
+infra/
+├── providers.tf
+├── variables.tf
+├── terraform.tfvars
+├── main.tf
+└── outputs.tf
+```
+
+Niente `backend.tf` per ora: lo state resta locale e lo spostiamo su S3 al passo 7.
+
+### providers.tf
+
+```hcl
+terraform {
+  required_version = ">= 1.10"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+
+  default_tags {
+    tags = {
+      Project   = var.project
+      ManagedBy = "terraform"
+    }
+  }
+}
+```
+
+### variables.tf
+
+```hcl
+variable "region" {
+  description = "Regione AWS in cui creare le risorse"
+  type        = string
+  default     = "eu-south-1"
+}
+
+variable "project" {
+  description = "Prefisso per i nomi delle risorse"
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]{3,20}$", var.project))
+    error_message = "Solo minuscole, numeri e trattini, da 3 a 20 caratteri."
+  }
+}
+```
+
+### terraform.tfvars
+
+```hcl
+project = "corso-aws"
+```
 
 ### main.tf
 
@@ -637,6 +793,10 @@ resource "random_id" "suffix" {
 resource "aws_s3_bucket" "demo" {
   # I nomi dei bucket sono globali: il suffisso casuale evita collisioni
   bucket = "${var.project}-demo-${random_id.suffix.hex}"
+
+  # Solo per il laboratorio: permette al destroy di cancellare il bucket
+  # anche se contiene file (vedi la domanda di verifica)
+  force_destroy = true
 }
 
 # Il versioning del bucket, gestito come risorsa separata
@@ -670,7 +830,7 @@ output "bucket_arn" {
 
 *Cosa fa la risorsa.* `random_id` è una risorsa "finta": non crea niente su AWS, esiste solo dentro Terraform (viene dal provider `random`, dichiarato in `providers.tf`). Quando la crei, Terraform tira a sorte un numero:
 
-- `byte_length = 4` significa "un numero grande 4 byte". Non serve capire i byte: basta sapere che, scritto in esadecimale, diventa **8 caratteri** tra `0-9` e `a-f`;
+- `byte_length = 4` significa "un numero grande 4 byte". Non serve capire i byte: basta sapere che, scritto in esadecimale (un modo di scrivere i numeri con le cifre `0-9` più le lettere `a-f`), diventa **8 caratteri**;
 - l'attributo `.hex` restituisce proprio quegli 8 caratteri, per esempio `a1b2c3d4`.
 
 *Perché non cambia ogni volta.* Il numero viene estratto **una volta sola**, al primo `apply`, e salvato nello state. Ai `plan` e `apply` successivi Terraform lo rilegge dallo state e usa lo stesso valore. Se cambiasse a ogni esecuzione cambierebbe anche il nome del bucket, e Terraform distruggerebbe e ricreerebbe il bucket ogni volta. Il numero cambia solo se distruggi la risorsa (`terraform destroy`) e la ricrei.
@@ -683,7 +843,7 @@ In sequenza:
 | `apply` successivi | Rilegge `a1b2c3d4` dallo state | invariato |
 | `destroy` e nuovo `apply` | Estrae un numero nuovo, per esempio `9f8e7d6c` | `corso-aws-demo-9f8e7d6c` (bucket nuovo) |
 
-**`aws_s3_bucket.demo`** crea il bucket. L'unico argomento, `bucket`, è il nome, costruito per interpolazione: `var.project` (dal tfvars: `corso-aws`) + `-demo-` + il suffisso casuale. Il risultato sarà qualcosa come `corso-aws-demo-a1b2c3d4`. Siccome usa `random_id.suffix.hex`, Terraform sa che deve prima generare il numero e poi creare il bucket.
+**`aws_s3_bucket.demo`** crea il bucket. L'argomento `bucket` è il nome, costruito per interpolazione: `var.project` (dal tfvars: `corso-aws`) + `-demo-` + il suffisso casuale. Il risultato sarà qualcosa come `corso-aws-demo-a1b2c3d4`. Siccome usa `random_id.suffix.hex`, Terraform sa che deve prima generare il numero e poi creare il bucket. `force_destroy = true` dice: "al `destroy`, cancella anche i file che ci sono dentro". Senza, AWS rifiuta di cancellare un bucket non vuoto. In un laboratorio è comodo; su un bucket con dati veri è pericoloso.
 
 **`aws_s3_bucket_versioning.demo`** attiva il versioning sul bucket: ogni volta che un file viene sovrascritto o cancellato, S3 conserva la versione precedente. Nel provider AWS molte impostazioni del bucket (versioning, cifratura, policy, blocco dell'accesso pubblico) sono **risorse separate** che "puntano" al bucket tramite l'argomento `bucket`. Qui `aws_s3_bucket.demo.id` è l'identificativo del bucket appena creato, che per S3 coincide con il nome. `versioning_configuration` è un blocco annidato (niente `=`) con dentro l'unico argomento `status`.
 
@@ -702,15 +862,44 @@ E i tag `Project` e `ManagedBy`, che non compaiono in nessuna risorsa? Arrivano 
 
 ### Passi
 
-1. `terraform init`, poi `terraform plan`. Quante risorse crea? Perché tre e non due?
-2. `terraform apply`. Controlla in console che il bucket esista e abbia i tag `Project` e `ManagedBy`.
-3. Aggiungi al bucket un blocco `tags = { Owner = "il-tuo-nome" }` e lancia `plan`. Che simbolo compare? (Atteso: `~`, modifica sul posto.)
-4. Cambia la parola `demo` nel nome del bucket e lancia `plan`. Che simbolo compare adesso e perché? (Atteso: `-/+`: il nome di un bucket non si può cambiare, quindi va ricreato.) Annulla la modifica senza applicarla.
-5. Aggiungi a mano un tag al bucket dalla console, poi lancia `plan`: Terraform vede il drift?
-6. `terraform state list`: cosa conosce Terraform?
-7. `terraform destroy`.
+Prima di cominciare: `aws sso login --profile corso` ed `export AWS_PROFILE=corso` (sezione 6). Poi, nel terminale, entra nella cartella con `cd infra`.
 
-**Domanda di verifica:** cosa succederebbe al punto 7 se nel bucket ci fossero dei file? (Il destroy fallisce: un bucket non vuoto non si cancella. Esiste l'opzione `force_destroy = true`, ma va usata con consapevolezza.)
+1. **`terraform init`**, poi **`terraform plan`**. Quante risorse crea? Perché tre e non due? (Atteso: `Plan: 3 to add`; la terza è `random_id`.)
+2. **`terraform apply`** e conferma con `yes`. Poi controlla in console: cerca **S3**, apri il bucket `corso-aws-demo-…`, scheda **Properties**, sezione **Tags**. Ci sono `Project` e `ManagedBy`?
+3. **Modifica sul posto.** In `main.tf`, dentro il blocco `resource "aws_s3_bucket" "demo"`, sotto la riga `bucket = ...`, aggiungi l'argomento:
+
+   ```hcl
+   tags = { Owner = "il-tuo-nome" }
+   ```
+
+   Lancia `plan`: che simbolo compare? (Atteso: `~`, modifica sul posto.) Poi `apply` per renderla effettiva.
+4. **Ricreazione.** Nella riga `bucket = ...` cambia la parola `demo` in `prova` e lancia `plan`. Che simbolo compare adesso e perché? (Atteso: `-/+`: il nome di un bucket non si può cambiare, quindi va distrutto e ricreato.) **Non applicare**: rimetti `demo` e verifica che `plan` dica `No changes`.
+5. **Drift.** In console, sempre in **Properties → Tags**, premi **Edit** e aggiungi a mano il tag `Test = manuale`. Poi lancia `plan`. (Atteso: `~` sul bucket, con la proposta di **togliere** il tag `Test`, perché nel codice non c'è.) Lancia `apply` per riallineare.
+6. **`terraform state list`**: cosa conosce Terraform? (Atteso: le tre risorse, con i loro indirizzi `tipo.nome`.)
+7. **Sposta lo state su S3.** Fin qui lo state era il file `terraform.tfstate` nella cartella. Crea il bucket per lo state, una volta sola, con la CLI:
+
+   ```bash
+   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+   echo $ACCOUNT_ID    # il numero del tuo account, 12 cifre
+
+   aws s3api create-bucket --bucket corso-aws-tfstate-$ACCOUNT_ID \
+     --region eu-south-1 --create-bucket-configuration LocationConstraint=eu-south-1
+   aws s3api put-bucket-versioning --bucket corso-aws-tfstate-$ACCOUNT_ID \
+     --versioning-configuration Status=Enabled
+   ```
+
+   `$( )` esegue il comando tra parentesi e ne salva il risultato nella variabile `ACCOUNT_ID`; `\` a fine riga significa "il comando continua sulla riga sotto". Il numero dell'account nel nome rende il bucket unico al mondo. I bucket nuovi nascono già cifrati e con l'accesso pubblico bloccato; il versioning conserva le versioni precedenti dello state, utile se un giorno si rovina.
+
+   Poi crea `backend.tf` con il blocco della sezione 3, scrivendo in `bucket` il nome vero (es. `corso-aws-tfstate-123456789012`), e lancia:
+
+   ```bash
+   terraform init -migrate-state
+   ```
+
+   Terraform chiede se copiare lo state esistente nel nuovo backend: rispondi `yes`. Da ora lo state vive su S3: controlla in console che nel bucket ci sia `corso/terraform.tfstate`. Il file locale `terraform.tfstate` rimasto nella cartella non serve più e si può cancellare.
+8. **`terraform destroy`** e conferma con `yes`. Il bucket `demo` sparisce; il bucket dello state no, perché non è gestito da Terraform: resta per le prossime dispense e costa pochi centesimi l'anno.
+
+**Domanda di verifica:** cosa succederebbe al punto 8 se nel bucket `demo` ci fossero dei file e **non** avessimo scritto `force_destroy = true`? (Il destroy fallisce: AWS non cancella un bucket non vuoto. `force_destroy` scavalca questa protezione, per questo si usa solo nei laboratori.)
 
 ---
 
