@@ -662,7 +662,26 @@ output "bucket_arn" {
 
 ### Cosa fa questo codice, blocco per blocco
 
-**`random_id.suffix`** viene dal provider `random`, non da AWS. Genera 4 byte casuali e li espone in vari formati; noi usiamo l'attributo `hex`, cioè 8 caratteri esadecimali come `a1b2c3d4`. Il valore viene salvato nello state: ai `plan` successivi **resta lo stesso**, non cambia a ogni esecuzione. Senza questo trucco due studenti che lanciano l'esercizio con lo stesso `project` si scontrerebbero, perché il nome di un bucket deve essere unico in **tutto** AWS, non solo nel tuo account.
+**`random_id.suffix`**: un "tira i dadi" per rendere unico il nome del bucket.
+
+*Il problema.* Il nome di un bucket S3 deve essere unico **in tutto il mondo**, tra tutti i clienti AWS, come un indirizzo email. Se tu e un altro studente chiamate entrambi il bucket `corso-aws-demo`, il secondo che lancia `apply` riceve un errore: "nome già preso".
+
+*La soluzione.* Si aggiunge in fondo al nome un pezzo casuale: `corso-aws-demo-a1b2c3d4`. La probabilità che qualcun altro abbia esattamente lo stesso suffisso è praticamente nulla.
+
+*Cosa fa la risorsa.* `random_id` è una risorsa "finta": non crea niente su AWS, esiste solo dentro Terraform (viene dal provider `random`, dichiarato in `providers.tf`). Quando la crei, Terraform tira a sorte un numero:
+
+- `byte_length = 4` significa "un numero grande 4 byte". Non serve capire i byte: basta sapere che, scritto in esadecimale, diventa **8 caratteri** tra `0-9` e `a-f`;
+- l'attributo `.hex` restituisce proprio quegli 8 caratteri, per esempio `a1b2c3d4`.
+
+*Perché non cambia ogni volta.* Il numero viene estratto **una volta sola**, al primo `apply`, e salvato nello state. Ai `plan` e `apply` successivi Terraform lo rilegge dallo state e usa lo stesso valore. Se cambiasse a ogni esecuzione cambierebbe anche il nome del bucket, e Terraform distruggerebbe e ricreerebbe il bucket ogni volta. Il numero cambia solo se distruggi la risorsa (`terraform destroy`) e la ricrei.
+
+In sequenza:
+
+| Momento | Cosa succede a `random_id.suffix` | Nome del bucket |
+|---|---|---|
+| Primo `apply` | Estrae `a1b2c3d4` e lo salva nello state | `corso-aws-demo-a1b2c3d4` |
+| `apply` successivi | Rilegge `a1b2c3d4` dallo state | invariato |
+| `destroy` e nuovo `apply` | Estrae un numero nuovo, per esempio `9f8e7d6c` | `corso-aws-demo-9f8e7d6c` (bucket nuovo) |
 
 **`aws_s3_bucket.demo`** crea il bucket. L'unico argomento, `bucket`, è il nome, costruito per interpolazione: `var.project` (dal tfvars: `corso-aws`) + `-demo-` + il suffisso casuale. Il risultato sarà qualcosa come `corso-aws-demo-a1b2c3d4`. Siccome usa `random_id.suffix.hex`, Terraform sa che deve prima generare il numero e poi creare il bucket.
 
