@@ -575,7 +575,41 @@ resource "aws_s3_bucket" "demo" {
 }
 ```
 
-Differenza tra `variable` e `locals`: la variabile arriva **da fuori** (chi usa il progetto la può cambiare), il local è **calcolato dentro** (chi usa il progetto non lo tocca). Se un valore si ripete in tre risorse ed è derivato da altri, è un local.
+#### Variable o local: chi decide il valore?
+
+Un **local** è un nome che dai a un calcolo, per scriverlo una volta sola e riusarlo. Esempio: tre bucket con lo stesso prefisso.
+
+Senza locals, la stessa formula è ripetuta tre volte (e se un giorno cambia, va corretta in tre posti):
+
+```hcl
+bucket = "${var.project}-${var.environment}-logs"
+bucket = "${var.project}-${var.environment}-dati"
+bucket = "${var.project}-${var.environment}-backup"
+```
+
+Con i locals, la formula si scrive una volta e le si dà un nome, `prefix`. Terraform la calcola (qui: `"corso-aws-dev"`) e ogni bucket la usa con `local.prefix`:
+
+```hcl
+locals {
+  prefix = "${var.project}-${var.environment}"
+}
+
+bucket = "${local.prefix}-logs"
+bucket = "${local.prefix}-dati"
+bucket = "${local.prefix}-backup"
+```
+
+La differenza, in una tabella:
+
+| | `variable` | `local` |
+|---|---|---|
+| **Chi decide il valore?** | **tu**, scrivendolo nel tfvars | **Terraform**, con una formula scritta nel codice |
+| **Dove si scrive?** | dichiarata in `variables.tf`, valore in `terraform.tfvars` | nel blocco `locals { … }` |
+| **Cambia tra dev e prod?** | sì: lo cambi tu nel tfvars | sì, ma da solo: si ricalcola dalle variabili |
+| **Come si legge?** | `var.environment` | `local.prefix` |
+| **Nell'esempio vale** | `"dev"` | `"corso-aws-dev"` |
+
+> **Analogia.** Le variabili sono gli ingredienti che porti tu (dal tfvars). Un local è una preparazione fatta in cucina con quegli ingredienti, come un soffritto, che poi usi in più piatti.
 
 **Quando cresce**, `main.tf` non si tiene come file unico da mille righe: si spezza **per dominio**. Nel progetto del corso arriveremo a questo:
 
