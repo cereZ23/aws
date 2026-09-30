@@ -1,4 +1,4 @@
-# Dispensa 0 – Terraform in 20 minuti
+# Dispensa 0 – Terraform: le basi
 
 *Corso: Infrastruttura AWS con Terraform*
 
