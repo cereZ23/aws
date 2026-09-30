@@ -282,6 +282,34 @@ flowchart LR
 
 > **Analogia.** `variables.tf` è un questionario con i campi vuoti ("Nome progetto: ____, Regione: ____"). `terraform.tfvars` è lo stesso questionario compilato. `main.tf` è l'ufficio che lavora sul questionario compilato. `outputs.tf` è la ricevuta che ti danno allo sportello.
 
+### Da dove prende cosa
+
+Quando lanci un comando `terraform`, il programma raccoglie quattro cose, tutte a partire dalla cartella in cui ti trovi:
+
+| Cosa | Da dove la prende | A cosa serve |
+|---|---|---|
+| **Cosa creare** | tutti i file `.tf` della cartella | le risorse descritte nei blocchi `resource` |
+| **I valori scelti** | `terraform.tfvars` (lo legge da solo, perché ha esattamente quel nome) | riempire le variabili dichiarate in `variables.tf` |
+| **Come parlare con AWS** | il provider, scaricato da `terraform init` nella cartella nascosta `.terraform/` | tradurre il codice in richieste ad AWS |
+| **Chi sei** | il login SSO, cioè il profilo `corso` (sezione 6) | il permesso temporaneo per agire nel tuo account |
+
+E produce due cose: le **risorse in AWS** e l'inventario aggiornato, il file **`terraform.tfstate`** (sezione 5).
+
+### Il percorso di un valore
+
+Per vedere come un valore passa da un file all'altro, seguiamo `environment` dall'inizio alla fine:
+
+| Passo | File | Codice | Cosa succede |
+|---|---|---|---|
+| 1 | `terraform.tfvars` | `environment = "dev"` | scrivi il valore scelto |
+| 2 | `variables.tf` | `variable "environment" {}` | dichiari che il campo esiste (senza, Terraform dà errore) |
+| 3 | `main.tf` | `var.environment` | lo leggi: vale `"dev"` |
+| 4 | `main.tf`, blocco `locals` | `"${var.project}-${var.environment}"` | lo usi per calcolare un prefisso: `"corso-aws-dev"` |
+| 5 | `main.tf`, una `resource` | `bucket = "${local.prefix}-logs"` | lo usi nel nome del bucket: `"corso-aws-dev-logs"` |
+| 6 | in AWS | `terraform apply` | il bucket nasce con quel nome |
+
+I costrutti usati ai passi 3-5 (`var.`, `local.`, `${ }`) sono spiegati nella sezione 2, alla voce "Le espressioni".
+
 Vediamo i file uno per uno: cosa contengono, quando cambiano e gli errori tipici.
 
 > **Attenzione: in questa sezione gli esempi servono a mostrare la sintassi, non vanno copiati.** Alcuni citano risorse che costruiremo più avanti (un database, delle istanze). I file esatti da creare per provare sono nell'esercizio, alla sezione 7.
