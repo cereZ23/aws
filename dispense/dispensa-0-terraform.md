@@ -63,6 +63,107 @@ resource "aws_s3_bucket_versioning" "demo" {
 
 Da questi riferimenti Terraform costruisce un **grafo** e crea in parallelo tutto quello che non dipende da altro. `depends_on` esiste, ma serve raramente: se lo usi spesso, di solito manca un riferimento.
 
+### Anatomia di un blocco
+
+Tutto il codice Terraform è fatto di **blocchi**. Prendiamone uno e smontiamolo pezzo per pezzo:
+
+```hcl
+resource "aws_s3_bucket" "demo" {   # (1) parola chiave + etichette, poi graffa aperta
+  bucket = "corso-aws-demo-1234"    # (2) argomento:  nome = valore
+
+  tags = {                          # (3) argomento il cui valore è una mappa
+    Owner = "mario"
+  }
+
+  lifecycle {                       # (4) blocco annidato: NIENTE "=" prima della graffa
+    prevent_destroy = true
+  }
+}                                   # fine del blocco
+```
+
+1. **Parola chiave ed etichette.** `resource` dice che tipo di blocco è. Le stringhe tra virgolette che seguono sono le etichette: per una risorsa sono il tipo (`aws_s3_bucket`, deciso dal provider) e il nome locale (`demo`, deciso da te).
+2. **Argomento.** Una riga `nome = valore` imposta una caratteristica della risorsa. Qui: il nome reale del bucket su AWS.
+3. **Argomento con una mappa.** Il valore può essere una struttura: qui una mappa di tag, cioè coppie chiave/valore.
+4. **Blocco annidato.** Un blocco dentro un blocco raggruppa impostazioni correlate. Si riconosce perché **non ha l'`=`** prima della graffa. `tags = { ... }` è un argomento, `lifecycle { ... }` è un blocco: la differenza sembra pignola, ma se la sbagli Terraform dà errore.
+
+I commenti si scrivono con `#` (o `//`) fino a fine riga, oppure `/* ... */` su più righe.
+
+### Come faccio a sapere quali argomenti scrivere?
+
+Non si inventano: li definisce il provider. Per ogni tipo di risorsa c'è una pagina nella documentazione del provider AWS (cerca per esempio "terraform aws_s3_bucket"), sempre con due sezioni:
+
+| Sezione della documentazione | Cosa contiene | Esempio per `aws_s3_bucket` |
+|---|---|---|
+| **Argument Reference** | Cosa **puoi scrivere** tu nel blocco (obbligatori e facoltativi) | `bucket`, `force_destroy`, `tags` |
+| **Attribute Reference** | Cosa **puoi leggere** dopo la creazione, perché lo calcola AWS | `id`, `arn`, `region` |
+
+Gli **argomenti** li decidi tu, gli **attributi** li scopri dopo la creazione. Per questo puoi scrivere `aws_s3_bucket.demo.arn` in un'altra risorsa, anche se l'ARN non l'hai mai scritto: Terraform lo conosce dopo aver creato il bucket.
+
+### I tipi di valore
+
+| Tipo | Come si scrive | Come si legge un elemento |
+|---|---|---|
+| `string` | `"testo"` | – |
+| `number` | `3`, `0.5` | – |
+| `bool` | `true`, `false` | – |
+| `list` | `["a", "b", "c"]` | `lista[0]` restituisce `"a"`: si conta da zero |
+| `map` / `object` | `{ nome = "web", porta = 443 }` | `mappa.nome` oppure `mappa["nome"]` |
+| `null` | `null` | Significa "come se non avessi scritto l'argomento" |
+
+### Le espressioni: dove il codice diventa dinamico
+
+A destra dell'`=` non ci sono solo valori fissi. Ci sono quattro costrutti che ritroverai in ogni dispensa.
+
+**Riferimenti**, cioè leggere un valore da un'altra parte della configurazione:
+
+| Scrivi | Leggi |
+|---|---|
+| `var.region` | Il valore della variabile `region` |
+| `local.name_prefix` | Un valore calcolato in un blocco `locals` |
+| `aws_s3_bucket.demo.arn` | Un attributo di una risorsa gestita da noi |
+| `data.aws_caller_identity.current.account_id` | Un attributo di un data source (qualcosa di esistente che leggiamo) |
+
+**Interpolazione**, cioè inserire un valore dentro una stringa con `${ }`:
+
+```hcl
+bucket = "${var.project}-demo"   # con project = "corso-aws" diventa "corso-aws-demo"
+bucket = var.nome                # se il valore è SOLO il riferimento, niente virgolette né ${ }
+```
+
+**Funzioni**, cioè trasformare valori: si scrivono `nome(argomenti)`. Non se ne possono definire di nuove, si usano quelle di Terraform. Alcune che incontrerai:
+
+| Funzione | Esempio | Risultato |
+|---|---|---|
+| `upper` | `upper("ciao")` | `"CIAO"` |
+| `length` | `length(["a", "b"])` | `2` |
+| `contains` | `contains(["dev", "prod"], "dev")` | `true` |
+| `regex` | `regex("^[a-z]+$", "abc")` | la parte che corrisponde, **errore** se non corrisponde |
+| `can` | `can(regex("^[a-z]+$", "ABC"))` | `false`: trasforma un errore in `false`, utile nelle `validation` |
+
+**Condizionale**, cioè scegliere tra due valori:
+
+```hcl
+instance_type = var.environment == "prod" ? "m7g.large" : "t4g.micro"
+#               condizione                  se vera       se falsa
+```
+
+### Provare senza paura: terraform console
+
+`terraform console` apre un prompt dove puoi scrivere espressioni e vedere il risultato, senza creare né modificare niente. È il modo più rapido per capire un pezzo di codice che non ti torna:
+
+```
+$ terraform console
+> upper("corso")
+"CORSO"
+> "${var.project}-demo"
+"corso-aws-demo"
+> var.environment == "prod" ? "grande" : "piccola"
+"piccola"
+> exit
+```
+
+Più avanti incontreremo costrutti per creare **più copie della stessa risorsa** (`for_each`) e per trasformare liste e mappe (le espressioni `for`): li vediamo nella dispensa 2, dove servono per la prima volta.
+
 ---
 
 ## 3. Struttura di un progetto
@@ -527,15 +628,18 @@ Per l'esercizio `variables.tf` deve dichiarare solo `region` e `project` (gli es
 ### main.tf
 
 ```hcl
+# Un numero casuale di 4 byte. Non crea niente su AWS.
 resource "random_id" "suffix" {
   byte_length = 4
 }
 
+# Il bucket vero e proprio
 resource "aws_s3_bucket" "demo" {
   # I nomi dei bucket sono globali: il suffisso casuale evita collisioni
   bucket = "${var.project}-demo-${random_id.suffix.hex}"
 }
 
+# Il versioning del bucket, gestito come risorsa separata
 resource "aws_s3_bucket_versioning" "demo" {
   bucket = aws_s3_bucket.demo.id
   versioning_configuration {
@@ -555,6 +659,27 @@ output "bucket_arn" {
   value = aws_s3_bucket.demo.arn
 }
 ```
+
+### Cosa fa questo codice, blocco per blocco
+
+**`random_id.suffix`** viene dal provider `random`, non da AWS. Genera 4 byte casuali e li espone in vari formati; noi usiamo l'attributo `hex`, cioè 8 caratteri esadecimali come `a1b2c3d4`. Il valore viene salvato nello state: ai `plan` successivi **resta lo stesso**, non cambia a ogni esecuzione. Senza questo trucco due studenti che lanciano l'esercizio con lo stesso `project` si scontrerebbero, perché il nome di un bucket deve essere unico in **tutto** AWS, non solo nel tuo account.
+
+**`aws_s3_bucket.demo`** crea il bucket. L'unico argomento, `bucket`, è il nome, costruito per interpolazione: `var.project` (dal tfvars: `corso-aws`) + `-demo-` + il suffisso casuale. Il risultato sarà qualcosa come `corso-aws-demo-a1b2c3d4`. Siccome usa `random_id.suffix.hex`, Terraform sa che deve prima generare il numero e poi creare il bucket.
+
+**`aws_s3_bucket_versioning.demo`** attiva il versioning sul bucket: ogni volta che un file viene sovrascritto o cancellato, S3 conserva la versione precedente. Nel provider AWS molte impostazioni del bucket (versioning, cifratura, policy, blocco dell'accesso pubblico) sono **risorse separate** che "puntano" al bucket tramite l'argomento `bucket`. Qui `aws_s3_bucket.demo.id` è l'identificativo del bucket appena creato, che per S3 coincide con il nome. `versioning_configuration` è un blocco annidato (niente `=`) con dentro l'unico argomento `status`.
+
+**Gli output** mostrano alla fine dell'`apply` il nome e l'ARN del bucket, due attributi che AWS conosce solo dopo averlo creato.
+
+L'ordine in cui Terraform crea le risorse, ricavato solo dai riferimenti:
+
+```mermaid
+flowchart LR
+    R["random_id.suffix<br/>genera a1b2c3d4"] -->|".hex nel nome"| B["aws_s3_bucket.demo<br/>crea il bucket"]
+    B -->|".id"| V["aws_s3_bucket_versioning.demo<br/>attiva il versioning"]
+    B -->|".bucket / .arn"| O["output<br/>bucket_name, bucket_arn"]
+```
+
+E i tag `Project` e `ManagedBy`, che non compaiono in nessuna risorsa? Arrivano dai `default_tags` del blocco `provider "aws"` (sezione 3): il provider li aggiunge da solo a ogni risorsa AWS che li supporta.
 
 ### Passi
 

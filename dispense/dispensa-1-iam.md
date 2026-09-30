@@ -205,7 +205,7 @@ Strumenti che aiutano:
 
 ### Scrivere le policy: `aws_iam_policy_document`
 
-Si può scrivere il JSON con `jsonencode()`, ma il data source `aws_iam_policy_document` è più leggibile, validato da Terraform e facile da comporre:
+Una risorsa IAM vuole la policy come **testo JSON**. Si potrebbe scriverlo a mano dentro Terraform con la funzione `jsonencode()`, che trasforma una mappa HCL in JSON. Ma il data source `aws_iam_policy_document` è più leggibile, viene validato da Terraform ed è facile da comporre. È un data source "speciale": non legge niente da AWS, fa solo da traduttore da blocchi HCL a JSON (la corrispondenza campo per campo è nell'esercizio).
 
 ```hcl
 data "aws_iam_policy_document" "esempio" {
@@ -314,6 +314,71 @@ output "reader_role_arn" {
   value = aws_iam_role.reader.arn
 }
 ```
+
+### Cosa fa questo codice
+
+Il file contiene due tipi di blocchi: i `data` **non creano niente**, servono a leggere informazioni o a costruire documenti; i `resource` creano oggetti veri su AWS. Vediamoli in ordine.
+
+**`data.aws_caller_identity.current`** chiede ad AWS "chi sono?" e restituisce l'account in uso. Il blocco è vuoto perché non ci sono parametri da passare. L'attributo che ci serve è `account_id`, per esempio `123456789012`.
+
+**`aws_s3_object.release`** carica un file nel bucket della dispensa 0: `bucket` dice dove, `key` è il percorso del file dentro il bucket, `content` è il testo del file. Ci serve solo per avere qualcosa da leggere nelle prove.
+
+**`data.aws_iam_policy_document.trust`** e **`data.aws_iam_policy_document.reader`** non creano niente su AWS: prendono i blocchi HCL e producono il **testo JSON** della policy, che trovi nell'attributo `.json`. Ogni pezzo HCL corrisponde a un campo JSON della sezione 3:
+
+| HCL (dentro `aws_iam_policy_document`) | JSON della policy |
+|---|---|
+| blocco `statement { ... }` (uno per regola) | un elemento di `"Statement": [ ... ]` |
+| `sid = "..."` | `"Sid"` |
+| `effect = "Deny"` (**se omesso vale `"Allow"`**) | `"Effect"` |
+| `actions = [...]` | `"Action"` |
+| `resources = [...]` | `"Resource"` |
+| blocco `principals { type = "AWS", identifiers = [...] }` | `"Principal": { "AWS": [...] }` |
+| blocco `condition { test, variable, values }` | `"Condition": { test: { variable: values } }` |
+
+Per esempio, il documento `trust` produce questo JSON:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Principal": { "AWS": "arn:aws:iam::123456789012:root" }
+  }]
+}
+```
+
+L'ARN del principal è costruito per interpolazione: `${data.aws_caller_identity.current.account_id}` viene sostituito dal numero dell'account. Così il codice funziona in qualunque account senza modifiche.
+
+Nel documento `reader` i primi due `statement` non hanno `effect`: sono quindi `Allow`. Il terzo ha `effect = "Deny"` esplicito. Il `condition` del primo statement si legge: "consenti `ListBucket` solo se il prefisso richiesto (`s3:prefix`) corrisponde, con confronto `StringLike` (che ammette `*`), a `releases/*`". Nota le due forme di `resources`: `aws_s3_bucket.demo.arn` è l'ARN del **bucket**, `"${aws_s3_bucket.demo.arn}/releases/*"` aggiunge in coda il percorso degli **oggetti**.
+
+**`aws_iam_role.reader`** crea il role:
+
+- `name`: il nome visibile in console, `corso-aws-artifact-reader`;
+- `assume_role_policy`: la **trust policy**, cioè il JSON del documento `trust` (`.json`);
+- `max_session_duration`: la durata massima, in secondi, delle credenziali temporanee (3600 = un'ora).
+
+Il role, a questo punto, **non può fare niente**: ha solo la lista di chi può assumerlo.
+
+**`aws_iam_policy.reader`** crea una policy gestita con dentro il JSON del documento `reader`. Da sola non vale niente: è un documento in archivio, non ancora assegnato a nessuno.
+
+**`aws_iam_role_policy_attachment.reader`** è il collegamento: dice "attacca questa policy (`policy_arn`) a questo role (`role`)". Solo da qui in poi il role ha i permessi. Nota che il role si indica per **nome** (`.name`) e la policy per **ARN** (`.arn`): è la documentazione della risorsa a stabilirlo.
+
+**`output.reader_role_arn`** stampa l'ARN del role, che serve per configurare la CLI nel passo successivo.
+
+Come si incastrano i pezzi:
+
+```mermaid
+flowchart LR
+    CI["data.aws_caller_identity<br/>numero dell'account"] --> T["data policy_document.trust<br/>JSON: chi può assumere"]
+    B["aws_s3_bucket.demo<br/>(dispensa 0)"] --> RD["data policy_document.reader<br/>JSON: cosa può fare"]
+    T -->|".json"| ROLE["aws_iam_role.reader"]
+    RD -->|".json"| POL["aws_iam_policy.reader"]
+    ROLE -->|".name"| ATT["aws_iam_role_policy_attachment<br/>collega policy e role"]
+    POL -->|".arn"| ATT
+```
+
+Per vedere il JSON che Terraform ha generato, dopo l'`apply` apri `terraform console` e scrivi `data.aws_iam_policy_document.reader.json`.
 
 ### Configurare la CLI per assumere il role
 

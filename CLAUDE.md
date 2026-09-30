@@ -46,6 +46,9 @@ un'infrastruttura AWS completa: VPC, firewall, VPN, EC2, RDS PostgreSQL in HA, S
 - Schemi in **Mermaid** (```mermaid): architettura, flussi, alberi di decisione. Almeno 2-3 per dispensa.
 - **Nessuna sovrapposizione** tra dispense: un concetto si spiega una volta sola, altrove si rimanda ("lo vediamo nella dispensa N").
 - Ogni dispensa costruisce sul progetto delle precedenti: **unica configurazione Terraform**, un file `.tf` per dominio.
+- **Il lettore non conosce Terraform**: ogni blocco di codice è seguito da una spiegazione "Cosa fa questo codice"
+  risorsa per risorsa (argomenti, riferimenti, perché serve). Un costrutto del linguaggio nuovo si spiega la prima volta
+  che compare (sintassi base in dispensa 0; `for_each`, espressioni `for`, `toset`, `slice` in dispensa 2), poi si rimanda.
 
 ## Parametri tecnici fissati
 

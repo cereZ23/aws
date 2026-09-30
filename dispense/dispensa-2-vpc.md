@@ -225,6 +225,57 @@ Invece di scrivere a mano sei subnet, sei associazioni e le relative rotte, calc
 
 > Nei progetti reali si usa spesso il modulo della community `terraform-aws-modules/vpc/aws`, che fa tutto questo e altro. Qui scriviamo le risorse a mano, perché l'obiettivo è capire ogni pezzo. Chi ha capito questa dispensa sa leggere e configurare quel modulo.
 
+Prima del codice servono tre strumenti nuovi del linguaggio: `for_each`, le espressioni `for` e `cidrsubnet`.
+
+### Più copie della stessa risorsa: for_each
+
+Le due subnet pubbliche sono identiche tranne AZ e CIDR. Scriverle due volte funziona, ma con tre livelli e tre AZ diventano nove blocchi quasi uguali, e ogni modifica va ripetuta nove volte. `for_each` dice a Terraform: "crea **una copia di questa risorsa per ogni elemento** di questa mappa".
+
+```hcl
+resource "aws_subnet" "esempio" {
+  for_each = {                          # la mappa da cui generare le copie
+    "eu-south-1a" = "10.20.0.0/24"
+    "eu-south-1b" = "10.20.1.0/24"
+  }
+
+  vpc_id            = aws_vpc.main.id
+  availability_zone = each.key          # la chiave dell'elemento corrente
+  cidr_block        = each.value        # il valore dell'elemento corrente
+}
+```
+
+Dentro il blocco, `each.key` ed `each.value` valgono di volta in volta la chiave e il valore dell'elemento corrente. Il risultato sono **due** subnet, che Terraform chiama così:
+
+| Indirizzo in Terraform | `each.key` | `each.value` |
+|---|---|---|
+| `aws_subnet.esempio["eu-south-1a"]` | `"eu-south-1a"` | `"10.20.0.0/24"` |
+| `aws_subnet.esempio["eu-south-1b"]` | `"eu-south-1b"` | `"10.20.1.0/24"` |
+
+Sono i nomi che vedrai nel `plan` e in `terraform state list`. Da qui derivano tre regole pratiche:
+
+- **Una copia si legge con la chiave tra parentesi quadre**: `aws_subnet.esempio["eu-south-1a"].id`.
+- **Senza parentesi quadre ottieni tutte le copie**, come mappa: `aws_subnet.esempio` è `{ "eu-south-1a" = <subnet>, "eu-south-1b" = <subnet> }`. E una mappa si può dare in pasto al `for_each` di un'altra risorsa: così si crea, per esempio, un'associazione per ogni subnet.
+- **`for_each` accetta una mappa o un set di stringhe**, non una lista. Una lista si converte con `toset(lista)`: in un set chiave e valore coincidono, quindi `each.key == each.value`.
+
+Esiste anche `count = 3`, che crea copie numerate `[0]`, `[1]`, `[2]`. È più semplice, ma se togli l'elemento `[0]` tutti gli altri scalano di posizione e Terraform li distrugge e ricrea. Con `for_each` ogni copia ha un nome stabile (la AZ), quindi aggiungere o togliere una AZ tocca **solo** quella.
+
+### Trasformare liste e mappe: le espressioni for
+
+Un'espressione `for` costruisce una lista o una mappa a partire da un'altra, come una formula applicata a ogni elemento:
+
+```hcl
+[for az in ["eu-south-1a", "eu-south-1b"] : upper(az)]
+# -> ["EU-SOUTH-1A", "EU-SOUTH-1B"]            parentesi quadre = produce una LISTA
+
+{for az in ["eu-south-1a", "eu-south-1b"] : az => "subnet-${az}"}
+# -> { "eu-south-1a" = "subnet-eu-south-1a", ... }   graffe e "=>" = produce una MAPPA
+
+[for i, az in ["eu-south-1a", "eu-south-1b"] : "${i}-${az}"]
+# -> ["0-eu-south-1a", "1-eu-south-1b"]        con due variabili, su una lista: posizione e valore
+```
+
+Su una mappa le due variabili sono chiave e valore: `{for k, v in mappa : k => v.id}`.
+
 ### La funzione cidrsubnet
 
 ```hcl
@@ -273,6 +324,11 @@ variable "single_nat_gateway" {
   default     = true
 }
 ```
+
+Le tre variabili sono i soli "comandi" della rete: tutto il resto si calcola da loro. Le due `validation` bloccano valori sbagliati già al `plan`:
+
+- per `vpc_cidr`, `cidrhost(var.vpc_cidr, 0)` prova a calcolare il primo indirizzo del blocco. Se il testo non è un CIDR valido la funzione va in errore, e `can()` trasforma quell'errore in `false`, quindi validazione fallita;
+- per `az_count`, `&&` significa "e": il numero deve essere almeno 2 **e** al massimo 3.
 
 ### vpc.tf
 
@@ -440,6 +496,55 @@ resource "aws_route_table_association" "db" {
 }
 ```
 
+### Leggere vpc.tf passo per passo
+
+Il file sembra lungo, ma segue sempre lo stesso schema. Lo seguiamo con i valori del laboratorio: `az_count = 2`, `single_nat_gateway = true`.
+
+**1. Quali AZ usare.** `data.aws_availability_zones.available` chiede ad AWS le AZ attive nella regione: `names` vale `["eu-south-1a", "eu-south-1b", "eu-south-1c"]`. `slice(lista, 0, var.az_count)` prende gli elementi dalla posizione 0 fino alla 2 **esclusa**, quindi `local.azs = ["eu-south-1a", "eu-south-1b"]`.
+
+**2. I CIDR per ogni AZ.** `local.subnets` è un'espressione `for` che scorre `local.azs` con posizione `i` e nome `az`, e per ognuna produce una mappa con i tre CIDR:
+
+| `i` | `az` | `public` = `cidrsubnet(…, 8, i)` | `private` = `…, 10 + i` | `db` = `…, 20 + i` |
+|---|---|---|---|---|
+| 0 | `eu-south-1a` | `10.20.0.0/24` | `10.20.10.0/24` | `10.20.20.0/24` |
+| 1 | `eu-south-1b` | `10.20.1.0/24` | `10.20.11.0/24` | `10.20.21.0/24` |
+
+Le graffe e `az => { ... }` la rendono una **mappa** con chiave la AZ: è proprio la forma che serve a `for_each`.
+
+**3. Dove mettere i NAT.** `local.nat_azs` usa il condizionale: se `single_nat_gateway` è vero prende solo la prima AZ (`[local.azs[0]]`, cioè `["eu-south-1a"]`), altrimenti tutte.
+
+**4. VPC e Internet Gateway.** `aws_vpc.main` crea la rete con il CIDR della variabile e il DNS attivo (sezione 6). `aws_internet_gateway.main` crea il portone verso internet e lo aggancia al VPC con `vpc_id = aws_vpc.main.id`. Da qui in poi quasi ogni risorsa ha un `vpc_id` o un riferimento simile: è così che Terraform sa che il VPC va creato per primo.
+
+**5. Le subnet.** I tre blocchi `aws_subnet` hanno `for_each = local.subnets`, quindi ciascuno crea una subnet per AZ. `each.key` è la AZ (va in `availability_zone` e nel nome); `each.value` è la mappa dei tre CIDR, da cui ogni livello prende il suo campo: `each.value.public`, `each.value.private`, `each.value.db`. Risultato: `aws_subnet.public["eu-south-1a"]`, `aws_subnet.public["eu-south-1b"]` e lo stesso per `private` e `db`.
+
+**6. NAT ed Elastic IP.** `aws_eip.nat` e `aws_nat_gateway.main` usano `for_each = toset(local.nat_azs)`: un set con la sola `"eu-south-1a"`, quindi una copia sola. Nel NAT, `aws_eip.nat[each.key].id` sceglie l'Elastic IP **della stessa AZ** e `aws_subnet.public[each.key].id` la subnet pubblica di quella AZ. `domain = "vpc"` indica che l'Elastic IP è per l'uso in un VPC. Il `depends_on` è spiegato nel commento: nessun argomento del NAT cita l'Internet Gateway, ma senza IGW il NAT non ha una via d'uscita, quindi l'ordine va imposto a mano.
+
+**7. Route table e rotte sono risorse separate.** `aws_route_table` crea la tabella vuota (con solo la rotta `local`, che AWS mette da sé). `aws_route` aggiunge una riga: destinazione `0.0.0.0/0` ("qualunque indirizzo non locale") verso `gateway_id` (l'IGW) oppure `nat_gateway_id` (il NAT).
+
+**8. Le associazioni.** `aws_route_table_association` collega una subnet a una route table. Il suo `for_each` è **la mappa delle subnet** stessa (`aws_subnet.public`): per ogni AZ, `each.value` è l'intera subnet, quindi `each.value.id` è il suo ID. Così le associazioni seguono sempre le subnet: aggiungi una AZ e compare anche la sua associazione.
+
+**9. La rotta privata sceglie il NAT.** In `aws_route.private_nat` il condizionale decide: con NAT unico tutte le rotte puntano a `aws_nat_gateway.main["eu-south-1a"]` (la prima AZ); con un NAT per AZ ognuna punta a `aws_nat_gateway.main[each.key]`, quello della propria AZ.
+
+**10. Il database.** Una sola route table senza `aws_route`: contiene solo la rotta `local`, quindi le subnet database parlano con il VPC e con nient'altro.
+
+Riassunto di chi dipende da chi:
+
+```mermaid
+flowchart LR
+    L["locals<br/>azs, subnets, nat_azs"] --> SUB["aws_subnet<br/>public / private / db<br/>una per AZ"]
+    VPC["aws_vpc.main"] --> SUB
+    VPC --> IGW["aws_internet_gateway"]
+    SUB --> NAT["aws_nat_gateway<br/>+ aws_eip"]
+    IGW -.->|depends_on| NAT
+    VPC --> RT["aws_route_table<br/>public / private / db"]
+    IGW --> R1["aws_route public<br/>0.0.0.0/0 → IGW"]
+    NAT --> R2["aws_route private<br/>0.0.0.0/0 → NAT"]
+    RT --> R1
+    RT --> R2
+    SUB --> ASS["aws_route_table_association<br/>una per subnet"]
+    RT --> ASS
+```
+
 Perché **una route table privata per AZ** anche quando il NAT è uno solo? Perché così passare da `single_nat_gateway = true` a `false` cambia solo la destinazione delle rotte, senza ristrutturare niente. Il codice è pronto per la produzione anche quando gira in modalità economica.
 
 ### flowlogs.tf (facoltativo)
@@ -492,6 +597,8 @@ output "nat_public_ips" {
   value       = [for e in aws_eip.nat : e.public_ip]
 }
 ```
+
+Gli output usano le espressioni `for` per trasformare le mappe di risorse in qualcosa di leggibile. `{ for az, s in aws_subnet.public : az => s.id }` scorre le subnet pubbliche e tiene, per ogni AZ, solo l'ID: `{ "eu-south-1a" = "subnet-0abc…", "eu-south-1b" = "subnet-0def…" }`. L'ultimo produce una **lista** (parentesi quadre) con gli IP pubblici di tutti gli Elastic IP. Questi ID serviranno alle dispense successive per mettere server e database nelle subnet giuste.
 
 ---
 
