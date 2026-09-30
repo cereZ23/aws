@@ -156,55 +156,90 @@ Gli **argomenti** li decidi tu, gli **attributi** li scopri dopo la creazione. P
 
 ### Le espressioni: dove il codice diventa dinamico
 
-A destra dell'`=` non ci sono solo valori fissi. Ci sono quattro costrutti che ritroverai in ogni dispensa.
+**Il problema.** Vogliamo un bucket per i log sia nell'ambiente di sviluppo (`dev`) sia in produzione (`prod`). Se scriviamo il nome a mano, `bucket = "corso-aws-dev-logs"`, per `prod` dobbiamo copiare il file e cambiare i nomi dappertutto, e prima o poi ci si dimentica un pezzo. Vogliamo invece scrivere il codice **una volta sola** e cambiare **un solo valore**, l'ambiente, nel `terraform.tfvars`. Per farlo, il codice deve saper *calcolare* nomi e impostazioni a partire da quel valore.
 
-**Riferimenti**, cioè leggere un valore da un'altra parte della configurazione:
-
-| Scrivi | Leggi |
-|---|---|
-| `var.region` | Il valore della variabile `region` |
-| `local.name_prefix` | Un valore calcolato in un blocco `locals` |
-| `aws_s3_bucket.demo.arn` | Un attributo di una risorsa gestita da noi |
-| `data.aws_caller_identity.current.account_id` | Un attributo di un data source (qualcosa di esistente che leggiamo) |
-
-**Interpolazione**, cioè inserire un valore dentro una stringa con `${ }`:
+Un'**espressione** è proprio questo: un pezzo di codice che Terraform calcola, al posto di un valore scritto fisso. Ecco l'esempio completo, con i valori `project = "corso-aws"` ed `environment = "dev"` nel tfvars:
 
 ```hcl
-bucket = "${var.project}-demo"   # con project = "corso-aws" diventa "corso-aws-demo"
-bucket = var.nome                # se il valore è SOLO il riferimento, niente virgolette né ${ }
+locals {
+  prefix = "${var.project}-${var.environment}"          # 1 interpolazione
+}
+
+resource "aws_s3_bucket" "logs" {
+  bucket = lower("${local.prefix}-logs")                # 2 riferimento + funzione
+}
+
+resource "aws_s3_bucket_versioning" "logs" {
+  bucket = aws_s3_bucket.logs.id                        # 3 riferimento a una risorsa
+  versioning_configuration {
+    status = var.environment == "prod" ? "Enabled" : "Suspended"   # 4 condizionale
+  }
+}
 ```
 
-**Funzioni**, cioè trasformare valori: si scrivono `nome(argomenti)`. Non se ne possono definire di nuove, si usano quelle di Terraform. Alcune che incontrerai:
+Cosa calcola Terraform, riga per riga:
 
-| Funzione | Esempio | Risultato |
+1. `"${var.project}-${var.environment}"`: dentro le virgolette, `${var.project}` diventa `corso-aws` e `${var.environment}` diventa `dev`. Risultato: `"corso-aws-dev"`.
+2. `lower("${local.prefix}-logs")`: legge il prefisso appena calcolato, aggiunge `-logs` e lo passa a `lower`, che lo rende minuscolo (i nomi dei bucket non ammettono maiuscole). Risultato: `"corso-aws-dev-logs"`.
+3. `aws_s3_bucket.logs.id`: l'identificativo del bucket appena creato. Siccome il versioning lo usa, Terraform sa che deve creare prima il bucket.
+4. `var.environment == "prod" ? "Enabled" : "Suspended"`: `"dev"` non è uguale a `"prod"`, quindi vale il secondo valore, `"Suspended"`. In produzione teniamo le versioni vecchie dei file, in sviluppo no.
+
+Il vantaggio: stesso codice, due ambienti.
+
+| Valore calcolato | `environment = "dev"` | `environment = "prod"` |
 |---|---|---|
-| `upper` | `upper("ciao")` | `"CIAO"` |
-| `length` | `length(["a", "b"])` | `2` |
-| `contains` | `contains(["dev", "prod"], "dev")` | `true` |
-| `regex` | `regex("^[a-z]+$", "abc")` | la parte che corrisponde, **errore** se non corrisponde |
-| `can` | `can(regex("^[a-z]+$", "ABC"))` | `false`: trasforma un errore in `false`, utile nelle `validation` |
+| `local.prefix` | `"corso-aws-dev"` | `"corso-aws-prod"` |
+| nome del bucket | `"corso-aws-dev-logs"` | `"corso-aws-prod-logs"` |
+| versioning | `"Suspended"` | `"Enabled"` |
 
-**Condizionale**, cioè scegliere tra due valori:
+Ora le quattro famiglie di espressioni una per una.
+
+**Riferimenti**: "prendi il valore che sta là". Il prefisso dice dove cercarlo:
+
+| Scrivi | Dove lo cerca | Nell'esempio vale |
+|---|---|---|
+| `var.environment` | una variabile: il valore arriva dal tfvars | `"dev"` |
+| `local.prefix` | un valore calcolato in un blocco `locals` | `"corso-aws-dev"` |
+| `aws_s3_bucket.logs.id` | un attributo di una risorsa creata da noi | `"corso-aws-dev-logs"` |
+| `data.aws_caller_identity.current.account_id` | un dato letto da AWS (un *data source*) | il numero dell'account |
+
+**Interpolazione**: dentro le virgolette, `${ … }` viene sostituito dal suo valore; il resto del testo resta uguale. Se il valore è **solo** un riferimento, senza testo intorno, non servono né virgolette né `${ }`:
 
 ```hcl
-instance_type = var.environment == "prod" ? "m7g.large" : "t4g.micro"
-#               condizione                  se vera       se falsa
+bucket = "${local.prefix}-logs"   # testo + valore: interpolazione
+bucket = aws_s3_bucket.logs.id    # solo il valore: niente virgolette
+```
+
+**Funzioni**: `nome(argomenti)` prende dei valori e ne restituisce uno nuovo. Non se ne possono inventare, si usano quelle di Terraform. Quelle che incontrerai nel corso:
+
+| Scrivi | Risultato | A cosa ci serve |
+|---|---|---|
+| `lower("Corso-AWS-dev")` | `"corso-aws-dev"` | i nomi dei bucket devono essere minuscoli |
+| `contains(["dev", "prod"], var.environment)` | `true` | in una `validation`: l'ambiente è tra quelli ammessi? |
+| `can(regex("^[a-z0-9-]+$", var.project))` | `true` | in una `validation`: il nome ha solo minuscole, cifre e trattini? (`regex` va in errore se il testo non corrisponde, `can` trasforma l'errore in `false`) |
+| `cidrsubnet("10.20.0.0/16", 8, 1)` | `"10.20.1.0/24"` | calcola gli indirizzi delle subnet (dispensa 2) |
+
+**Condizionale**: si legge "se la condizione è vera usa il primo valore, altrimenti il secondo". `==` significa "è uguale a":
+
+```hcl
+status = var.environment == "prod" ? "Enabled" : "Suspended"
+#        condizione                  se vera     se falsa
 ```
 
 ### Provare senza paura: terraform console
 
 `terraform console` apre un prompt dove puoi scrivere espressioni e vedere il risultato, senza creare né modificare niente. È il modo più rapido per capire un pezzo di codice che non ti torna.
 
-Si lancia **dentro la cartella del progetto, dopo `terraform init`** (sezione 4). Le funzioni come `upper(...)` funzionano sempre; `var.qualcosa` funziona solo se quella variabile è dichiarata nei file della cartella (l'esempio sotto presuppone `project` ed `environment`, che vedremo nella sezione 3). Si esce con `exit`.
+Si lancia **dentro la cartella del progetto, dopo `terraform init`** (sezione 4). Le funzioni come `lower(...)` funzionano sempre; `var.qualcosa` funziona solo se quella variabile è dichiarata nei file della cartella (l'esempio sotto presuppone `project` ed `environment`, che vedremo nella sezione 3). Si esce con `exit`.
 
 ```
 $ terraform console
-> upper("corso")
-"CORSO"
-> "${var.project}-demo"
-"corso-aws-demo"
-> var.environment == "prod" ? "grande" : "piccola"
-"piccola"
+> lower("Corso-AWS")
+"corso-aws"
+> "${var.project}-${var.environment}"
+"corso-aws-dev"
+> var.environment == "prod" ? "Enabled" : "Suspended"
+"Suspended"
 > exit
 ```
 
