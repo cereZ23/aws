@@ -158,31 +158,106 @@ Gli **argomenti** li decidi tu, gli **attributi** li scopri dopo la creazione. P
 
 **Il problema.** Vogliamo un bucket per i log sia nell'ambiente di sviluppo (`dev`) sia in produzione (`prod`). Se scriviamo il nome a mano, `bucket = "corso-aws-dev-logs"`, per `prod` dobbiamo copiare il file e cambiare i nomi dappertutto, e prima o poi ci si dimentica un pezzo. Vogliamo invece scrivere il codice **una volta sola** e cambiare **un solo valore**, l'ambiente, nel `terraform.tfvars`. Per farlo, il codice deve saper *calcolare* nomi e impostazioni a partire da quel valore.
 
-Un'**espressione** è proprio questo: un pezzo di codice che Terraform calcola, al posto di un valore scritto fisso. Ecco l'esempio completo, con i valori `project = "corso-aws"` ed `environment = "dev"` nel tfvars:
+Un'**espressione** è proprio questo: un pezzo di codice che Terraform calcola, al posto di un valore scritto fisso.
+
+#### Come nasce il nome del bucket: dove sta ogni pezzo
+
+Il nome finale sarà `corso-aws-dev-logs`. I suoi pezzi stanno in **tre file diversi** della stessa cartella:
+
+**File `terraform.tfvars`**: qui scrivi i valori scelti.
+
+```hcl
+project     = "corso-aws"
+environment = "dev"
+```
+
+**File `variables.tf`**: qui dichiari che quei campi esistono. I nomi devono essere identici a quelli del tfvars.
+
+```hcl
+variable "project" {}
+variable "environment" {}
+```
+
+**File `main.tf`**: qui usi i valori per costruire il nome.
 
 ```hcl
 locals {
-  prefix = "${var.project}-${var.environment}"          # 1 interpolazione
+  prefix = "${var.project}-${var.environment}"
 }
 
 resource "aws_s3_bucket" "logs" {
-  bucket = lower("${local.prefix}-logs")                # 2 riferimento + funzione
+  bucket = "${local.prefix}-logs"
 }
+```
 
+Il percorso di ogni pezzo, da un file all'altro:
+
+```mermaid
+flowchart LR
+    subgraph T["terraform.tfvars"]
+        TP["project = &quot;corso-aws&quot;"]
+        TE["environment = &quot;dev&quot;"]
+    end
+    subgraph V["variables.tf"]
+        VP["variable &quot;project&quot;"]
+        VE["variable &quot;environment&quot;"]
+    end
+    subgraph MT["main.tf"]
+        L["locals: prefix =<br/>&quot;corso-aws-dev&quot;"]
+        B["bucket =<br/>&quot;corso-aws-dev-logs&quot;"]
+    end
+    TP --> VP -->|"var.project"| L
+    TE --> VE -->|"var.environment"| L
+    L -->|"local.prefix + -logs"| B
+    B -->|"terraform apply"| AWS(("bucket in AWS"))
+    classDef proj fill:#FDE3C0,stroke:#F28C28,color:#000
+    classDef env fill:#D6F2DF,stroke:#2E9E6B,color:#000
+    classDef pre fill:#E6DEFF,stroke:#5B3FD0,color:#000
+    class TP,VP proj
+    class TE,VE env
+    class L,B pre
+```
+
+**Passo 1: i valori** (`terraform.tfvars` e `variables.tf`). Nel tfvars scrivi `project = "corso-aws"` ed `environment = "dev"`; in `variables.tf` dichiari che i campi `project` ed `environment` esistono. Da qui in poi, in qualunque file `.tf` della cartella:
+
+```
+var.project      vale  "corso-aws"
+var.environment  vale  "dev"
+```
+
+**Passo 2: il prefisso** (`main.tf`, blocco `locals`). Terraform sostituisce ogni `${ … }` con il suo valore; il trattino in mezzo resta com'è:
+
+```
+"${var.project}-${var.environment}"
+      ↓               ↓
+"corso-aws"   -     "dev"        →   local.prefix = "corso-aws-dev"
+```
+
+**Passo 3: il nome** (`main.tf`, la risorsa `aws_s3_bucket`). Terraform sostituisce `${local.prefix}` e attacca `-logs`:
+
+```
+"${local.prefix}-logs"
+        ↓
+"corso-aws-dev" + "-logs"        →   bucket = "corso-aws-dev-logs"
+```
+
+Con `terraform apply`, in AWS nasce un bucket con esattamente quel nome: lo vedi nella console.
+
+#### E il versioning solo in produzione
+
+Il **versioning** (conservare le vecchie copie dei file) lo vogliamo solo in produzione. Si aggiunge in `main.tf`:
+
+```hcl
 resource "aws_s3_bucket_versioning" "logs" {
-  bucket = aws_s3_bucket.logs.id                        # 3 riferimento a una risorsa
+  bucket = aws_s3_bucket.logs.id
   versioning_configuration {
-    status = var.environment == "prod" ? "Enabled" : "Suspended"   # 4 condizionale
+    status = var.environment == "prod" ? "Enabled" : "Suspended"
   }
 }
 ```
 
-Cosa calcola Terraform, riga per riga:
-
-1. `"${var.project}-${var.environment}"`: dentro le virgolette, `${var.project}` diventa `corso-aws` e `${var.environment}` diventa `dev`. Risultato: `"corso-aws-dev"`.
-2. `lower("${local.prefix}-logs")`: legge il prefisso appena calcolato, aggiunge `-logs` e lo passa a `lower`, che lo rende minuscolo (i nomi dei bucket non ammettono maiuscole). Risultato: `"corso-aws-dev-logs"`.
-3. `aws_s3_bucket.logs.id`: l'identificativo del bucket appena creato. Siccome il versioning lo usa, Terraform sa che deve creare prima il bucket.
-4. `var.environment == "prod" ? "Enabled" : "Suspended"`: `"dev"` non è uguale a `"prod"`, quindi vale il secondo valore, `"Suspended"`. In produzione teniamo le versioni vecchie dei file, in sviluppo no.
+- `aws_s3_bucket.logs.id` è l'identificativo del bucket appena creato: il versioning va su quel bucket, e siccome lo usa, Terraform crea prima il bucket.
+- `var.environment == "prod" ? "Enabled" : "Suspended"` si legge "se l'ambiente è prod usa `Enabled`, altrimenti `Suspended`". Con `"dev"` la condizione è falsa, quindi `"Suspended"`.
 
 Il vantaggio: stesso codice, due ambienti.
 
