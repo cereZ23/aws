@@ -33,7 +33,7 @@ Nel corso usiamo la **regione** `eu-south-1`, cioè i data center AWS di Milano.
 Tutti gli esercizi di questa dispensa costano praticamente zero. Nelle dispense successive alcune risorse si pagano a ore (lo segnaliamo ogni volta). Due abitudini da prendere subito:
 
 - chiudere **sempre** un esercizio con `terraform destroy`;
-- impostare un **budget** con avviso via email: console → **Billing and Cost Management** → **Budgets** → **Create budget**, per esempio 10 € al mese.
+- impostare un **budget** con avviso via email: console → **Billing and Cost Management** → **Budgets** → **Create budget**.
 
 ### Piccolo glossario
 
@@ -897,7 +897,7 @@ Prima di cominciare: `aws sso login --profile corso` ed `export AWS_PROFILE=cors
    ```
 
    Terraform chiede se copiare lo state esistente nel nuovo backend: rispondi `yes`. Da ora lo state vive su S3: controlla in console che nel bucket ci sia `corso/terraform.tfstate`. Il file locale `terraform.tfstate` rimasto nella cartella non serve più e si può cancellare.
-8. **`terraform destroy`** e conferma con `yes`. Il bucket `demo` sparisce; il bucket dello state no, perché non è gestito da Terraform: resta per le prossime dispense e costa pochi centesimi l'anno.
+8. **`terraform destroy`** e conferma con `yes`. Il bucket `demo` sparisce; il bucket dello state no, perché non è gestito da Terraform: resta per le prossime dispense.
 
 **Domanda di verifica:** cosa succederebbe al punto 8 se nel bucket `demo` ci fossero dei file e **non** avessimo scritto `force_destroy = true`? (Il destroy fallisce: AWS non cancella un bucket non vuoto. `force_destroy` scavalca questa protezione, per questo si usa solo nei laboratori.)
 

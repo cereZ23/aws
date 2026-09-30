@@ -217,7 +217,7 @@ Da sapere:
 
 - Il NAT Gateway **sta in una subnet pubblica**, perché lui stesso esce tramite l'Internet Gateway.
 - Vive in **una sola AZ**. Se quella AZ ha un problema, le subnet private che lo usano perdono l'uscita verso internet.
-- **Costa**: si paga a ore, anche quando non passa traffico, più ogni GB che lo attraversa. Indicativamente circa 0,05 $ l'ora, cioè oltre 35 $ al mese se resta acceso, più l'Elastic IP (circa 0,005 $ l'ora); controlla i prezzi aggiornati di Milano sulla pagina prezzi di AWS. Nei laboratori va distrutto a fine giornata.
+- **Costa**: si paga a ore, anche quando non passa traffico, più ogni GB che lo attraversa. Anche l'Elastic IP si paga a ore. Nei laboratori va distrutto a fine giornata.
 
 Da qui la scelta di progetto:
 
