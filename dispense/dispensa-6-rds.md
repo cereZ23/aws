@@ -300,7 +300,7 @@ variable "db_instance_class" {
 variable "db_engine_version" {
   description = "Versione principale di PostgreSQL"
   type        = string
-  default     = "17"
+  default     = "18"
 }
 
 variable "db_multi_az" {
@@ -431,7 +431,7 @@ output "db_secret_arn" {
 |---|---|---|
 | `identifier` | `corso-aws-db` | il nome del database in AWS (e l'inizio dell'endpoint) |
 | `engine` | `"postgres"` | il motore: PostgreSQL |
-| `engine_version` | `"17"` | solo la versione principale: la versione minore la sceglie AWS e la aggiorna da sola (`auto_minor_version_upgrade`) |
+| `engine_version` | `"18"` | solo la versione principale: la versione minore la sceglie AWS e la aggiorna da sola (`auto_minor_version_upgrade`) |
 | `instance_class` | `db.t4g.micro` | il tipo di macchina; come per EC2, `t4g` = piccola e con processore Graviton |
 
 **Il disco.** `allocated_storage = 20` sono i GB iniziali; `max_allocated_storage = 100` permette a RDS di **ingrandirlo da solo** quando si riempie, fino a 100 GB, senza fermare niente. `storage_encrypted = true` lo cifra con la chiave `aws/rds` (sezione 7): non scrivendo `kms_key_id`, si usa quella.
@@ -476,7 +476,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
 
    ```bash
    sudo su -
-   dnf install -y postgresql17     # se non lo trova: dnf search postgresql
+   dnf install -y postgresql18     # se non lo trova: dnf search postgresql
    ```
 
    Poi, sostituendo i due valori letti prima:
@@ -494,7 +494,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
    psql "$DB" -c "select version();"
    ```
 
-   (Atteso: `PostgreSQL 17.…`. Il server ha letto la password grazie a `secrets.tf` ed è passato dal SG `db` grazie alla regola `db_from_app`.) Domanda: se togliessi `secrets.tf`, quale comando fallirebbe, e con quale errore?
+   (Atteso: `PostgreSQL 18.…`. Il server ha letto la password grazie a `secrets.tf` ed è passato dal SG `db` grazie alla regola `db_from_app`.) Domanda: se togliessi `secrets.tf`, quale comando fallirebbe, e con quale errore?
 
 5. **Da casa, come amministratore.** Con Tailscale acceso e il tuo nome in `tailscale_admins` (dispensa 5), installa `psql` sul tuo computer (su Mac: `brew install libpq`; oppure un programma grafico come DBeaver). Leggi la password con il tuo login AWS:
 
