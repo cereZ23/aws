@@ -22,7 +22,7 @@ flowchart LR
     L3 --> L4["4 · EC2"]
     L4 --> L5["5 · Tailscale"]
     L5 --> L6["6 · RDS"]
-    L6 --> L7["7 · S3"]
+    L6 --> L7["7 · ECR e S3"]
     L7 --> L8["8 · Deploy"]
 ```
 
@@ -54,8 +54,8 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 4 | **EC2: il server**: AMI, user_data, role e instance profile, SSM senza SSH | [dispensa-4-ec2.md](dispense/dispensa-4-ec2.md) | [slide-4-ec2.pptx](slide/slide-4-ec2.pptx) | ✅ Pronta |
 | 5 | **Accesso remoto: Tailscale**: subnet router, login con passkey o GitHub + Google Authenticator, permessi per gruppo | [dispensa-5-tailscale.md](dispense/dispensa-5-tailscale.md) | [slide-5-tailscale.pptx](slide/slide-5-tailscale.pptx) | ✅ Pronta |
 | 6 | **RDS PostgreSQL in alta affidabilità**: Multi-AZ e failover, backup e PITR, KMS, password in Secrets Manager, protezione dalla cancellazione | [dispensa-6-rds.md](dispense/dispensa-6-rds.md) | [slide-6-rds.pptx](slide/slide-6-rds.pptx) | ✅ Pronta |
-| 7 | **S3**: il repository degli artefatti | – | – | In preparazione |
-| 8 | **Deploy end-to-end** | – | – | In preparazione |
+| 7 | **Immagini e artefatti**: ECR per i container, S3 per i file di deploy | – | – | In preparazione |
+| 8 | **Deploy end-to-end**: GitHub Actions senza chiavi, ECR, server che si ricrea da solo (ASG) | – | – | In preparazione |
 | A | **Appendice**: IAM avanzato e audit | – | – | In preparazione |
 
 ---
@@ -93,7 +93,8 @@ infra/
 ├── tailscale.tf       # lezione 5
 ├── rds.tf             # lezione 6
 ├── secrets.tf         # lezione 6: il server legge la password del database
-├── s3.tf              # lezione 7
+├── ecr.tf             # lezione 7: le immagini dei container
+├── s3.tf              # lezione 7: i file di deploy
 └── outputs.tf         # cosa stampare alla fine
 ```
 

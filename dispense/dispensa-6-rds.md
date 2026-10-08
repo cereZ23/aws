@@ -280,6 +280,10 @@ Chi deve leggere la password?
 
 Siccome la password **cambia ogni 7 giorni**, nessuno deve copiarla in un file: va letta dal segreto **ogni volta** che serve.
 
+> **Attenzione alla rotazione, e un'alternativa.** La rotazione automatica funziona solo se l'applicazione **rilegge il segreto** quando il login fallisce. Molte applicazioni invece leggono la password **una volta, all'avvio**, e la tengono in memoria o in un file di configurazione: dopo 7 giorni RDS la cambia, le connessioni già aperte continuano a funzionare, ma alla prima riconnessione l'applicazione resta fuori.
+>
+> Le strade sono due. **Uno:** l'applicazione rilegge il segreto quando il login fallisce. È la soluzione giusta, e la vediamo nella dispensa 8. **Due:** niente rotazione automatica. La password la genera Terraform con `random_password`, la mette in un segreto di Secrets Manager e la imposta sul database nello stesso `apply`; per cambiarla la si rigenera e si riavvia l'applicazione. Il prezzo: la password finisce nello **state**, che va quindi trattato come un segreto (bucket privato, cifrato, letto da pochissimi). La scelgono i progetti che preferiscono una rotazione **decisa da loro** a una automatica.
+
 ---
 
 ## 9. Le protezioni contro la cancellazione

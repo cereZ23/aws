@@ -228,6 +228,10 @@ Da qui la scelta di progetto:
 
 Nel codice la rendiamo una variabile, così lo stesso progetto serve a entrambi.
 
+> **Alternativa: niente NAT, ogni server con il suo IP pubblico.** Il NAT Gateway si paga anche quando non lavora. Se i server che devono uscire su internet sono pochi, se ne può fare a meno: si mettono nelle **subnet pubbliche**, ognuno con il suo IP pubblico, e il loro Security Group **non ha nessuna regola in ingresso** (dispensa 3). L'IP pubblico serve solo per **uscire**: da fuori non entra nessuno, perché il Security Group scarta tutto ciò che non è la risposta a una connessione partita dal server. È una scelta frequente nei progetti piccoli.
+>
+> Il prezzo: il server è direttamente su internet, protetto da **una** barriera (il Security Group) invece che da **due** (nessuna strada in ingresso, più il Security Group). Un errore nelle regole lo espone subito. Il database, invece, non va mai lì: resta nelle subnet senza uscita. Nel corso teniamo il NAT, perché rende più facile vedere la differenza tra pubblico e privato.
+
 Nella dispensa su S3 vedremo anche i **VPC endpoint**, che permettono di raggiungere servizi AWS come S3 senza passare dal NAT: più sicuri e, per S3, gratuiti.
 
 ---

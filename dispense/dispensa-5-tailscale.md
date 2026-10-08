@@ -93,6 +93,10 @@ Il router **cambia il mittente** dei pacchetti con il proprio indirizzo prima di
 
 Il router deve annunciare le subnet che vogliamo raggiungere (*advertise routes*): nel nostro caso le subnet **private** e le subnet **database**.
 
+> **Alternativa: Tailscale direttamente sul server.** Se c'è un solo server da raggiungere, si può installare Tailscale **sul server stesso**, senza router. Con il comando `tailscale serve` il server pubblica la sua applicazione nel tailnet in HTTPS, con un nome come `https://app.<nome-del-tailnet>.ts.net` e un certificato valido. Il suo Security Group può restare **senza nessuna regola in ingresso**, perché la connessione verso Tailscale la apre il server.
+>
+> Vantaggi: un server in meno e nessun SG `vpn`. Limiti: si raggiunge **solo quel server**, non il database (per usare psql da casa serve comunque un subnet router, o un tunnel con SSM). E quando il server viene ricreato, quello nuovo deve rientrare nel tailnet con **lo stesso nome**: prima bisogna togliere il vecchio dispositivo, altrimenti Tailscale chiama il nuovo `app-1`. Si automatizza con un *client OAuth* di Tailscale. Nel corso usiamo il router perché mostra come si entra in un'intera rete, database compreso.
+
 ---
 
 ## 5. Chi si collega: login e MFA
