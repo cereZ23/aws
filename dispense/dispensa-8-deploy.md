@@ -762,20 +762,20 @@ jobs:
   immagine:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
           aws-region: eu-south-1
 
       - uses: aws-actions/amazon-ecr-login@v2
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           platforms: linux/arm64
           provenance: false
@@ -848,7 +848,7 @@ La funzione **`templatefile(file, valori)`** legge un file e ci sostituisce le p
 
 **`Dockerfile`**: parte dall'immagine di Python (dalla copia di AWS, come nella dispensa 7), installa psycopg, copia `app.py`, e dice quale comando lanciare all'avvio del container.
 
-**`release.yml`**: `on` dice quando parte il workflow (a ogni push su `main`, oppure a mano). `permissions` dà al workflow il permesso di chiedere il token OIDC (`id-token: write`) e di leggere il codice. Il resto sono i sei passi della sezione 3. `${{ vars.NOME }}` è una **variabile del repository**, che imposti su GitHub; `${{ github.sha }}` è il codice del commit. Le versioni delle azioni (`@v4`, `@v6`…) cambiano nel tempo: se ce n'è una più recente, si aggiorna il numero.
+**`release.yml`**: `on` dice quando parte il workflow (a ogni push su `main`, oppure a mano). `permissions` dà al workflow il permesso di chiedere il token OIDC (`id-token: write`) e di leggere il codice. Il resto sono i sei passi della sezione 3. `${{ vars.NOME }}` è una **variabile del repository**, che imposti su GitHub; `${{ github.sha }}` è il codice del commit. Le versioni delle azioni (`@v7`, `@v6`…) cambiano nel tempo: se ce n'è una più recente, si aggiorna il numero. In produzione conviene "inchiodarle" al codice di un commit (`@3d3c42e…`) invece che al numero di versione: un numero si può spostare, un commit no.
 
 ---
 
