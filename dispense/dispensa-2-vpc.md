@@ -10,6 +10,14 @@ Tutto quello che viene dopo (firewall, VPN, server, database) vive **dentro** qu
 
 ---
 
+## Prima di iniziare
+
+- Si lavora nella stessa cartella `infra/` delle dispense 0 e 1. Nell'esercizio aggiungi tre variabili in fondo a `variables.tf`, crei `vpc.tf` (e, se vuoi, `flowlogs.tf`) e aggiungi gli output in fondo a `outputs.tf`.
+- La dispensa 1 finiva con un `destroy`: il `plan` ricreerà anche bucket, file e role delle dispense precedenti. È normale.
+- Rinnova il login: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
+
+---
+
 ## 1. Cos'è un VPC
 
 Un **VPC** (Virtual Private Cloud) è una rete privata e isolata dentro AWS, tutta tua. Nessun altro cliente AWS la vede, e niente entra o esce se non lo decidi tu.
@@ -134,8 +142,6 @@ Una **Availability Zone** (AZ) è uno o più data center fisicamente separati da
 
 Il punto chiave: **ogni subnet vive in una sola AZ**. Se un'AZ ha un problema, tutte le sue subnet (e ciò che contengono) sono a rischio. Per questo ogni livello dell'architettura si **duplica su almeno due AZ**. È anche un requisito concreto: RDS Multi-AZ (dispensa 6) pretende subnet database in almeno due AZ.
 
-Una curiosità utile: i nomi `eu-south-1a`, `1b` ecc. sono mappati in modo diverso da account ad account (la tua "1a" può essere la "1b" di un altro). L'identificativo fisico stabile è l'**AZ ID** (per esempio `eus1-az1`). Conta quando si coordinano più account.
-
 ---
 
 ## 4. Subnet e route table: cosa rende pubblica una subnet
@@ -176,7 +182,7 @@ Per essere raggiungibile da internet, una risorsa in una subnet pubblica deve an
 
 Attenzione: in una subnet pubblica una risorsa **senza** IP pubblico non riesce nemmeno a **uscire** su internet. L'Internet Gateway traduce infatti solo gli indirizzi delle risorse che ne hanno uno pubblico. Per uscire senza IP pubblico serve una subnet privata con il NAT.
 
-L'opzione `map_public_ip_on_launch` della subnet dà un IP pubblico a ogni istanza avviata lì. Noi la lasciamo **disattivata** anche sulle subnet pubbliche: lì ci va solo il NAT, che usa un suo Elastic IP. Nessuna istanza deve ritrovarsi esposta per sbaglio.
+L'opzione `map_public_ip_on_launch` della subnet dà un IP pubblico a ogni server avviato lì. Noi la lasciamo **disattivata** anche sulle subnet pubbliche: lì ci va solo il NAT, che usa un suo Elastic IP. Nessun server deve ritrovarsi esposto per sbaglio.
 
 C'è poi una terza condizione: anche con rotta e IP pubblico, il traffico deve essere ammesso dai **firewall** del VPC. Sono l'argomento della dispensa 3. In questa dispensa ci occupiamo solo di **dove** il traffico può andare; nella prossima, di **cosa** può passare.
 
@@ -228,9 +234,7 @@ Da qui la scelta di progetto:
 
 Nel codice la rendiamo una variabile, così lo stesso progetto serve a entrambi.
 
-> **Alternativa: niente NAT, ogni server con il suo IP pubblico.** Il NAT Gateway si paga anche quando non lavora. Se i server che devono uscire su internet sono pochi, se ne può fare a meno: si mettono nelle **subnet pubbliche**, ognuno con il suo IP pubblico, e il loro Security Group **non ha nessuna regola in ingresso** (dispensa 3). L'IP pubblico serve solo per **uscire**: da fuori non entra nessuno, perché il Security Group scarta tutto ciò che non è la risposta a una connessione partita dal server. È una scelta frequente nei progetti piccoli.
->
-> Il prezzo: il server è direttamente su internet, protetto da **una** barriera (il Security Group) invece che da **due** (nessuna strada in ingresso, più il Security Group). Un errore nelle regole lo espone subito. Il database, invece, non va mai lì: resta nelle subnet senza uscita. Nel corso teniamo il NAT, perché rende più facile vedere la differenza tra pubblico e privato.
+Esiste un'alternativa più economica, senza NAT: la vediamo nella dispensa 3, dopo aver capito i Security Group.
 
 Nella dispensa 7 vedremo anche i **VPC endpoint**, che permettono di raggiungere servizi AWS come S3 senza passare dal NAT: più sicuri e, per S3, gratuiti.
 
@@ -252,7 +256,7 @@ I **Flow Logs** registrano i metadati di ogni connessione: sorgente, destinazion
 
 Servono per il troubleshooting ("perché questa connessione non passa?") e sono una fonte fondamentale per la sicurezza. Permettono di scoprire scansioni (qualcuno che prova una porta dopo l'altra), esfiltrazioni (dati copiati fuori di nascosto) e movimenti laterali (un attaccante che da un server compromesso prova a raggiungerne altri). Si possono inviare a CloudWatch Logs o a S3; S3 è più economico per la conservazione.
 
-Una nota pratica: quando si abilitano i Flow Logs verso un bucket S3, AWS aggiunge da solo una bucket policy per poterci scrivere. Se in futuro la bucket policy di quel bucket sarà gestita da Terraform, va scritta includendo quei permessi, altrimenti i due si sovrascrivono a vicenda. Per questo si usa un bucket dedicato ai log.
+Una nota pratica: AWS aggiunge da solo al bucket dei log una bucket policy per poterci scrivere, quindi si usa un bucket dedicato ai log.
 
 ---
 
@@ -262,7 +266,7 @@ Invece di scrivere a mano sei subnet, sei associazioni e le relative rotte, calc
 
 > Nei progetti reali si usa spesso il modulo della community `terraform-aws-modules/vpc/aws`, che fa tutto questo e altro. Qui scriviamo le risorse a mano, perché l'obiettivo è capire ogni pezzo. Chi ha capito questa dispensa sa leggere e configurare quel modulo.
 
-Prima del codice servono tre strumenti nuovi del linguaggio: `for_each`, le espressioni `for` e `cidrsubnet`.
+Prima del codice servono tre strumenti nuovi del linguaggio: `for_each`, le espressioni `for` e la funzione `cidrsubnet`.
 
 ### Più copie della stessa risorsa: for_each
 
@@ -294,7 +298,7 @@ Sono i nomi che vedrai nel `plan` e in `terraform state list`. Da qui derivano t
 - **Senza parentesi quadre ottieni tutte le copie**, come mappa: `aws_subnet.esempio` è `{ "eu-south-1a" = <subnet>, "eu-south-1b" = <subnet> }`. E una mappa si può dare in pasto al `for_each` di un'altra risorsa: così si crea, per esempio, un'associazione per ogni subnet.
 - **`for_each` accetta una mappa o un set di stringhe**, non una lista. Un **set** è come una lista, ma senza ordine e senza doppioni: `toset(["a", "b", "a"])` dà `["a", "b"]`. Non avendo posizioni, ogni elemento si identifica con il suo valore, quindi in un `for_each` su un set `each.key` ed `each.value` coincidono.
 
-Esiste anche `count = 3`, che crea copie numerate `[0]`, `[1]`, `[2]`. È più semplice, ma se togli l'elemento `[0]` tutti gli altri scalano di posizione e Terraform li distrugge e ricrea. Con `for_each` ogni copia ha un nome stabile (la AZ), quindi aggiungere o togliere una AZ tocca **solo** quella.
+Esiste anche `count`, un modo più semplice di dire quante copie creare: nel corso non ci serve.
 
 ### Trasformare liste e mappe: le espressioni for
 
@@ -306,12 +310,7 @@ Un'espressione `for` costruisce una lista o una mappa a partire da un'altra, com
 
 {for az in ["eu-south-1a", "eu-south-1b"] : az => "subnet-${az}"}
 # -> { "eu-south-1a" = "subnet-eu-south-1a", ... }   graffe e "=>" = produce una MAPPA
-
-[for i, az in ["eu-south-1a", "eu-south-1b"] : "${i}-${az}"]
-# -> ["0-eu-south-1a", "1-eu-south-1b"]        con due variabili, su una lista: posizione e valore
 ```
-
-Su una mappa le due variabili sono chiave e valore: `{for k, v in mappa : k => v.id}`.
 
 ### La funzione cidrsubnet
 
@@ -336,12 +335,7 @@ Si può provare dal vivo con `terraform console`, che valuta le espressioni senz
 variable "vpc_cidr" {
   description = "CIDR del VPC"
   type        = string
-  default     = "10.20.0.0/16"
-
-  validation {
-    condition     = can(cidrhost(var.vpc_cidr, 0))
-    error_message = "Deve essere un CIDR valido, es. 10.20.0.0/16."
-  }
+  default     = "10.20.0.0/16"   # deve essere un CIDR valido, es. 10.20.0.0/16
 }
 
 variable "az_count" {
@@ -362,10 +356,7 @@ variable "single_nat_gateway" {
 }
 ```
 
-Le tre variabili sono i soli "comandi" della rete: tutto il resto si calcola da loro. Le due `validation` bloccano valori sbagliati già al `plan`:
-
-- per `vpc_cidr`, `cidrhost(var.vpc_cidr, 0)` prova a calcolare il primo indirizzo del blocco. Se il testo non è un CIDR valido la funzione va in errore, e `can()` trasforma quell'errore in `false`, quindi validazione fallita;
-- per `az_count`, `&&` significa "e": il numero deve essere almeno 2 **e** al massimo 3.
+Le tre variabili sono i soli "comandi" della rete: tutto il resto si calcola da loro. La `validation` su `az_count` blocca valori sbagliati già al `plan`: `&&` significa "e", quindi il numero deve essere almeno 2 **e** al massimo 3.
 
 ### vpc.tf
 
@@ -541,7 +532,7 @@ Il file sembra lungo, ma segue sempre lo stesso schema. Lo seguiamo con i valori
 
 **1. Quali AZ usare.** `data.aws_availability_zones.available` chiede ad AWS le AZ attive nella regione: `names` vale `["eu-south-1a", "eu-south-1b", "eu-south-1c"]`. `slice(lista, 0, var.az_count)` prende gli elementi dalla posizione 0 fino alla 2 **esclusa**, quindi `local.azs = ["eu-south-1a", "eu-south-1b"]`.
 
-**2. I CIDR per ogni AZ.** `local.subnets` è un'espressione `for` che scorre `local.azs` con posizione `i` e nome `az`, e per ognuna produce una mappa con i tre CIDR:
+**2. I CIDR per ogni AZ.** `local.subnets` è un'espressione `for` con **due** variabili: `for i, az in local.azs`. Su una lista, la prima variabile (`i`) è la **posizione** dell'elemento, contando da 0, e la seconda (`az`) è il suo **valore**. Per ogni AZ produce una mappa con i tre CIDR:
 
 | `i` | `az` | `public` = `cidrsubnet(…, 8, i)` | `private` = `…, 10 + i` | `db` = `…, 20 + i` |
 |---|---|---|---|---|
@@ -639,7 +630,7 @@ output "nat_public_ips" {
 }
 ```
 
-Gli output usano le espressioni `for` per trasformare le mappe di risorse in qualcosa di leggibile. `{ for az, s in aws_subnet.public : az => s.id }` scorre le subnet pubbliche e tiene, per ogni AZ, solo l'ID: `{ "eu-south-1a" = "subnet-0abc…", "eu-south-1b" = "subnet-0def…" }`. L'ultimo produce una **lista** (parentesi quadre) con gli IP pubblici di tutti gli Elastic IP. Questi ID serviranno alle dispense successive per mettere server e database nelle subnet giuste.
+Gli output usano le espressioni `for` per trasformare le mappe di risorse in qualcosa di leggibile. Su una **mappa**, le due variabili del `for` sono chiave e valore: `{ for az, s in aws_subnet.public : az => s.id }` scorre le subnet pubbliche e tiene, per ogni AZ, solo l'ID: `{ "eu-south-1a" = "subnet-0abc…", "eu-south-1b" = "subnet-0def…" }`. L'ultimo produce una **lista** (parentesi quadre) con gli IP pubblici di tutti gli Elastic IP. Questi ID serviranno alle dispense successive per mettere server e database nelle subnet giuste.
 
 ---
 
@@ -647,18 +638,20 @@ Gli output usano le espressioni `for` per trasformare le mappe di risorse in qua
 
 Obiettivo: creare il VPC a tre livelli, verificare che le route table facciano quello che dicono, e osservare come reagisce il plan a modifiche di diverso peso.
 
-### Prima di iniziare
-
-- Si lavora nella stessa cartella `infra/` delle dispense 0 e 1. Aggiungi le tre variabili in fondo a `variables.tf`, crea `vpc.tf` (e, se vuoi, `flowlogs.tf`) e aggiungi gli output in fondo a `outputs.tf`.
-- La dispensa 1 finiva con un `destroy`: il `plan` ricreerà anche bucket, file e role delle dispense precedenti. È normale.
-- Rinnova il login: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
+I prerequisiti sono nella sezione "Prima di iniziare".
 
 ### Passi
 
 1. **Prova `cidrsubnet` in `terraform console`.** Scrivi `cidrsubnet("10.20.0.0/16", 8, 20)` e poi `cidrsubnet("10.20.0.0/16", 8, 11)`. Corrispondono al piano della sezione 2? (Atteso: `10.20.20.0/24` e `10.20.11.0/24`.) Esci con `exit`.
 2. **`terraform plan`.** Conta le risorse **della rete** per tipo: quante subnet, quante route table, quante rotte, quante associazioni, quanti NAT ed Elastic IP? Spiega ogni numero a partire da `az_count = 2` e `single_nat_gateway = true`. (Atteso: 23 risorse di rete, 26 con `flowlogs.tf`, più le 7 ricreate delle dispense 0 e 1.)
 3. **`terraform apply`.** Il NAT Gateway richiede qualche minuto: è normale. Poi riapri `terraform console` e scrivi `local.subnets`: è la mappa della sezione 8 (passo 2 della lettura guidata)?
-4. **Controlla le route table dalla CLI:**
+4. **Controlla le route table in console.** Apri **VPC → Route tables**, filtra per il tuo VPC (`corso-aws-vpc`) e, per ogni tabella, apri la scheda **Routes**.
+
+   Per ciascuna route table rispondi: dove porta `0.0.0.0/0`? Quale non ha affatto quella rotta? Cosa significa la rotta con destinazione `10.20.0.0/16` e target `local`?
+
+   Vedrai anche una tabella senza nome: è la main route table creata da AWS insieme al VPC (sezione 4), che nessuna delle nostre subnet usa.
+
+   *Facoltativo, dalla CLI* (su Windows usa la console):
 
    ```bash
    aws ec2 describe-route-tables --region eu-south-1 \
@@ -667,16 +660,12 @@ Obiettivo: creare il VPC a tre livelli, verificare che le route table facciano q
      --output json
    ```
 
-   `--filters` tiene solo le route table del nostro VPC. `--query` sfoltisce la risposta, che altrimenti è lunghissima: per ogni tabella tiene il tag `Name` e, per ogni rotta, la destinazione e il gateway (IGW o NAT). La sintassi è quella di JMESPath, un linguaggio per estrarre pezzi di JSON; non serve impararla. Un pezzo dell'output atteso:
+   `--filters` tiene solo le route table del nostro VPC; `--query` sfoltisce la risposta (la sintassi non serve impararla). Un pezzo dell'output atteso, dove la main route table compare con `"Nome": null`:
 
    ```json
    { "Nome": "corso-aws-rt-public",
      "Rotte": [["10.20.0.0/16", "local"], ["0.0.0.0/0", "igw-0abc123..."]] }
    ```
-
-   Vedrai anche una tabella con `"Nome": null`: è la main route table creata da AWS insieme al VPC (sezione 4), che nessuna delle nostre subnet usa.
-
-   Per ciascuna route table rispondi: dove porta `0.0.0.0/0`? Quale non ha affatto quella rotta? Cosa significa la rotta con destinazione `10.20.0.0/16` e gateway `local`?
 
 Nei passi 5, 6 e 7 cambiamo una variabile **solo per un `plan`**, senza toccare i file: l'opzione `-var` dà un valore alla variabile per quel comando soltanto (dispensa 0, sezione 3). Così non c'è niente da ricordarsi di annullare.
 
@@ -694,9 +683,9 @@ Nei passi 5, 6 e 7 cambiamo una variabile **solo per un `plan`**, senza toccare 
 
 ### Domande di verifica
 
-1. Una subnet ha la rotta `0.0.0.0/0` verso l'Internet Gateway ma l'istanza al suo interno non ha un IP pubblico. È raggiungibile da internet? Può uscire su internet?
+1. Una subnet ha la rotta `0.0.0.0/0` verso l'Internet Gateway ma il server al suo interno non ha un IP pubblico. È raggiungibile da internet? Può uscire su internet?
 2. Perché il NAT Gateway sta in una subnet pubblica e non in una privata?
-3. Con `single_nat_gateway = true`, cosa succede alle istanze della AZ-b se la AZ-a ha un guasto? E al database?
+3. Con `single_nat_gateway = true`, cosa succede ai server della AZ-b se la AZ-a ha un guasto? E al database?
 4. Un collega crea una subnet a mano dalla console e non la associa a nessuna route table. Dove finisce? È un problema?
 5. Chi si collega in VPN da casa ha la rete `192.168.1.0/24`. Perché il piano indirizzi del corso non la usa da nessuna parte?
 

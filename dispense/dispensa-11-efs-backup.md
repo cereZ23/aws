@@ -1,10 +1,10 @@
-# Dispensa 10 (facoltativa) – File condivisi e backup: EFS e AWS Backup
+# Dispensa 11 (facoltativa) – File condivisi e backup: EFS e AWS Backup
 
 *Corso: Infrastruttura AWS con Terraform*
 
 ## Obiettivo
 
-Dalla dispensa 8 il server è "bestiame": niente di unico deve vivere sul suo disco. I dati stanno nel database, i file di deploy in S3. Ma molte applicazioni scrivono anche dei **file**: immagini caricate dagli utenti, documenti, allegati. Sul disco del server sparirebbero alla prima sostituzione. Questa dispensa, facoltativa, dà ai file un posto che sopravvive al server, e un **backup** gestito in un posto solo.
+Dalla dispensa 9 il server è "bestiame": niente di unico deve vivere sul suo disco. I dati stanno nel database, i file di deploy in S3. Ma molte applicazioni scrivono anche dei **file**: immagini caricate dagli utenti, documenti, allegati. Sul disco del server sparirebbero alla prima sostituzione. Questa dispensa, facoltativa, dà ai file un posto che sopravvive al server, e un **backup** gestito in un posto solo.
 
 Alla fine di questa dispensa:
 
@@ -18,7 +18,7 @@ Alla fine di questa dispensa:
 
 ## Prima di iniziare
 
-- Serve tutto quello della dispensa 8 (ASG, script di avvio). La dispensa 9 non è necessaria.
+- Serve tutto quello della dispensa 9 (ASG, script di avvio). La dispensa 10 non è necessaria.
 - Si lavora nella cartella `infra/`: questa dispensa aggiunge `storage.tf` e `backup.tf` e modifica `user_data.sh.tpl`, `deploy.tf` e `deploy/docker-compose.yml`.
 - Rinnova il login: `aws sso login --profile corso`, `export AWS_PROFILE=corso`, `export TAILSCALE_API_KEY=…`.
 - **Costi:** EFS si paga per lo spazio occupato (poco, con pochi file; i file non toccati da 30 giorni passano a una classe più economica); i backup si pagano per lo spazio che occupano. A fine esercizio si cancella tutto.
@@ -31,7 +31,7 @@ Alla fine di questa dispensa:
 |---|---|---|---|
 | Come lo vede l'app | una cartella normale | **una cartella normale** | non è una cartella: si usa con le sue API (`PutObject`, `GetObject`) |
 | Chi lo può usare | **un** server alla volta, nella sua AZ | **più server**, in **tutte** le AZ | chiunque abbia il permesso |
-| Se il server viene sostituito | il disco sparisce con lui (dispensa 8) | **resta** | **resta** |
+| Se il server viene sostituito | il disco sparisce con lui (dispensa 9) | **resta** | **resta** |
 | Va bene per | il sistema operativo, le immagini Docker | file di un'app che usa cartelle normali | file serviti o scaricati via API, archivi, artefatti (dispensa 7) |
 
 > **Analogia.** EBS è il **cassetto della scrivania**: comodo, ma se cambi scrivania resta lì. EFS è l'**armadio condiviso dell'ufficio**: ci arrivi da qualunque scrivania, anche da un altro piano. S3 è il **magazzino esterno**: ci tieni moltissimo, ma per prendere una cosa compili un modulo.
@@ -110,6 +110,14 @@ Due cose da sapere:
 
 - EFS ha anche un interruttore semplice, `aws_efs_backup_policy`, che lo affida a un piano di AWS Backup già pronto. È comodo, ma non decidi tu orari e durata: qui scriviamo il nostro piano;
 - un vault si può **bloccare** (*Vault Lock*): nessuno, nemmeno l'amministratore, può cancellare i backup prima della scadenza. È la difesa contro chi, entrato nell'account, vuole distruggere anche i backup. Non lo usiamo in laboratorio, perché poi non si potrebbe pulire.
+
+```mermaid
+flowchart LR
+    FS[("File system EFS")] -->|"ogni notte (piano)"| RP["Recovery point<br/>nel vault"]
+    RP -->|"35 giorni, poi si cancella"| X(("✗"))
+    RP -->|"Restore: un file<br/>o tutto"| R["Cartella aws-backup-restore_…<br/>nello stesso file system"]
+    R -->|"lo copi tu al suo posto"| FS
+```
 
 ---
 
@@ -324,6 +332,10 @@ output "efs_id" {
   value = aws_efs_file_system.files.id
 }
 
+output "efs_arn" {
+  value = aws_efs_file_system.files.arn
+}
+
 output "backup_role_arn" {
   value = aws_iam_role.backup.arn
 }
@@ -371,7 +383,7 @@ Obiettivo: verificare che i file sopravvivono al server, fare un backup e ripris
    ```
 
    (Atteso: `/mnt/efs` è un file system grande "8.0E", cioè praticamente senza limite; il file appartiene a `1000 1000` anche se l'hai scritto con `sudo`: è l'access point.) Controlla anche dal container: `sudo docker compose --project-directory /etc/app exec app ls /app/files`.
-3. **Il file sopravvive al server.** Termina il server dalla console (come nella dispensa 8). Quando l'ASG ne ha creato un altro, entra e lancia `cat /mnt/efs/prova.txt`. (Atteso: il file c'è, anche se magari il server è nato nell'altra AZ.)
+3. **Il file sopravvive al server.** Termina il server dalla console (come nella dispensa 9). Quando l'ASG ne ha creato un altro, entra e lancia `cat /mnt/efs/prova.txt`. (Atteso: il file c'è, anche se magari il server è nato nell'altra AZ.)
 4. **Senza TLS e senza role non si entra.** Sul server, prova a montare il file system "a mano", come un normale disco di rete NFS, **senza** l'aiuto di `amazon-efs-utils`: quindi senza TLS e senza presentare il role. L'ID del file system lo trovi con `grep efs /etc/fstab` (inizia con `fs-`):
 
    ```bash
@@ -385,14 +397,21 @@ Obiettivo: verificare che i file sopravvivono al server, fare un backup e ripris
 
    ```bash
    aws backup start-backup-job --backup-vault-name corso-aws-backup \
-     --resource-arn "$(aws efs describe-file-systems --file-system-id "$(terraform output -raw efs_id)" \
-       --query 'FileSystems[0].FileSystemArn' --output text)" \
+     --resource-arn "$(terraform output -raw efs_arn)" \
      --iam-role-arn "$(terraform output -raw backup_role_arn)"
    ```
 
    In console, **AWS Backup → Jobs**: lo stato passa da *Running* a *Completed* in qualche minuto.
 6. **Cancella il file.** Sul server: `sudo rm /mnt/efs/prova.txt`.
-7. **Ripristinalo.** In console: **AWS Backup → Vaults → corso-aws-backup**, apri il *recovery point* appena creato → **Restore**. Scegli **Item-level restore**, percorso `/files/prova.txt`, e ripristino nello **stesso** file system. AWS Backup rimette il file in una cartella nuova, alla radice del file system, chiamata `aws-backup-restore_…`. Quella cartella sta **fuori** dalla radice dell'access point, quindi da `/mnt/efs` non si vede: per prenderla, monta per un attimo l'intero file system (con TLS) e copia il file al suo posto:
+7. **Ripristinalo.** Prima di cominciare, uno schema di dove finirà il file. Il ripristino lo rimette in una cartella **nuova**, alla radice del file system; ma il server vede solo `/files`, la radice dell'access point:
+
+   ```
+   / (la radice del file system)
+   ├── files/                       ← quello che il server vede come /mnt/efs
+   └── aws-backup-restore_…/files/prova.txt   ← qui torna il file
+   ```
+
+   In console: **AWS Backup → Vaults → corso-aws-backup**, apri il *recovery point* appena creato → **Restore**. Scegli **Item-level restore**, percorso `/files/prova.txt`, e ripristino nello **stesso** file system. AWS Backup rimette il file in una cartella nuova, alla radice del file system, chiamata `aws-backup-restore_…`. Quella cartella sta **fuori** dalla radice dell'access point, quindi da `/mnt/efs` non si vede: per prenderla, monta per un attimo l'intero file system (con TLS) e copia il file al suo posto:
 
    ```bash
    sudo mkdir -p /mnt/efs-tutto
@@ -404,11 +423,11 @@ Obiettivo: verificare che i file sopravvivono al server, fare un backup e ripris
    ```
 
    (Atteso: il file è tornato, con il testo originale.)
-8. **Pulizia.** Come nella dispensa 8: `db_deletion_protection = false`, `apply`, `destroy`, cancella lo snapshot finale del database. Il vault, grazie a `force_destroy`, viene cancellato con i suoi backup.
+8. **Pulizia.** Come nella dispensa 9: `db_deletion_protection = false`, `apply`, `destroy`, cancella lo snapshot finale del database. Il vault, grazie a `force_destroy`, viene cancellato con i suoi backup.
 
 ### Domande di verifica
 
-1. Perché i file caricati dagli utenti non possono stare sul disco del server, dalla dispensa 8 in poi? Quando sceglieresti EFS e quando S3?
+1. Perché i file caricati dagli utenti non possono stare sul disco del server, dalla dispensa 9 in poi? Quando sceglieresti EFS e quando S3?
 2. Perché un mount target per ogni AZ?
 3. Cosa fa un access point? Cosa succederebbe senza, se due programmi scrivessero con utenti diversi?
 4. Il file system ha due protezioni contro chi non dovrebbe montarlo. Quali? E contro chi lo monta senza TLS?

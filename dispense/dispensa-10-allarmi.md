@@ -1,10 +1,10 @@
-# Dispensa 9 – Allarmi e auto-riparazione
+# Dispensa 10 – Allarmi e auto-riparazione
 
 *Corso: Infrastruttura AWS con Terraform*
 
 ## Obiettivo
 
-Nella dispensa 8 il server si ricrea da solo se la **macchina** si ferma. Ma restano due buchi: se la macchina è accesa e l'**applicazione** è bloccata, nessuno se ne accorge; e quando qualcosa si rompe (o si ripara da solo), **nessuno lo sa**. Questa dispensa chiude entrambi.
+Nella dispensa 9 il server si ricrea da solo se la **macchina** si ferma. Ma restano due buchi: se la macchina è accesa e l'**applicazione** è bloccata, nessuno se ne accorge; e quando qualcosa si rompe (o si ripara da solo), **nessuno lo sa**. Questa dispensa chiude entrambi.
 
 Alla fine di questa dispensa:
 
@@ -19,7 +19,7 @@ Alla fine di questa dispensa:
 
 ## Prima di iniziare
 
-- Si lavora nella cartella `infra/` di sempre, con tutto quello della dispensa 8 (ASG, script di avvio, `corso-app`). Questa dispensa aggiunge il file `monitoring.tf` e modifica `rds.tf`, `deploy.tf`, `user_data.sh.tpl` e l'applicazione.
+- Si lavora nella cartella `infra/` di sempre, con tutto quello delle dispense 8 e 9 (`corso-app`, ASG, script di avvio). Questa dispensa aggiunge il file `monitoring.tf` e modifica `rds.tf`, `deploy.tf`, `user_data.sh.tpl` e l'applicazione.
 - Serve un indirizzo **email** a cui ricevere gli allarmi.
 - Per il dead man's switch (facoltativo) serve un account su un servizio esterno di controllo, per esempio **healthchecks.io** (il piano gratuito basta).
 - Rinnova il login: `aws sso login --profile corso`, `export AWS_PROFILE=corso`, `export TAILSCALE_API_KEY=…`.
@@ -31,7 +31,7 @@ Alla fine di questa dispensa:
 
 | Cosa si rompe | Chi se ne accorge oggi |
 |---|---|
-| la macchina si spegne, o l'AZ si ferma | l'ASG, che la sostituisce (dispensa 8). Ma **tu non lo sai** |
+| la macchina si spegne, o l'AZ si ferma | l'ASG, che la sostituisce (dispensa 9). Ma **tu non lo sai** |
 | la macchina è accesa, l'applicazione è bloccata (il database non risponde, un errore la tiene appesa) | **nessuno**: per l'ASG va tutto bene |
 | il database ha la CPU al massimo da un'ora, o sta finendo lo spazio | **nessuno**, finché non si ferma |
 | è giù **tutto**: la regione, l'account, la rete di casa da cui guardi | **nessuno**: anche gli strumenti che dovrebbero avvisarti sono giù |
@@ -99,7 +99,7 @@ Una cosa da sapere: quando Terraform iscrive un indirizzo email, AWS manda a que
 | memoria, processi, disco **del sistema operativo** | **Enhanced Monitoring** | RDS non ha un terminale (dispensa 6): questo è il modo di vedere cosa succede "sotto" PostgreSQL, ogni minuto |
 | gli errori e i messaggi di PostgreSQL | **export dei log** in CloudWatch Logs | per leggerli serve la console; esportati, si cercano e si conservano |
 
-Performance Insights (che AWS sta ribattezzando *Database Insights*) ha un livello base incluso, con 7 giorni di storico. Su alcune taglie molto piccole di database non è disponibile: se l'`apply` dà errore su quella riga, toglila.
+Performance Insights (che AWS sta ribattezzando *Database Insights*) ha un livello base incluso, con 7 giorni di storico. Non tutte le taglie di database lo supportano: per questo è una **variabile**, spenta di default. Se vuoi provarlo, mettila a `true` e lancia `apply`: se AWS rifiuta, la tua taglia non lo supporta.
 
 Enhanced Monitoring ha bisogno di un **role**: è RDS stesso (il servizio `monitoring.rds.amazonaws.com`) che scrive le metriche in CloudWatch Logs, e per farlo deve assumere un role con la policy pronta di AWS `AmazonRDSEnhancedMonitoringRole`. È la stessa idea del role del server (dispensa 4), per un servizio diverso.
 
@@ -112,7 +112,7 @@ I **log** esportati finiscono in log group con un nome fisso (`/aws/rds/instance
 | l'ASG ha **zero server** in funzione per 10 minuti di fila | allarme sulla metrica `GroupInServiceInstances` dell'ASG |
 | un server è stato **creato**, **tolto**, o non si è riusciti a crearlo | **notifiche dell'ASG**, subito |
 
-Perché due cose diverse? Una sostituzione normale (dispensa 8) dura 5-7 minuti: l'allarme a 10 minuti **non suona**, ed è giusto, perché non c'è niente da fare. Ma così non sapresti nemmeno che è successo. Le **notifiche** ti dicono "il server è stato tolto" e "ne è stato creato uno nuovo" in pochi secondi, ogni volta. L'allarme suona solo se il problema **dura**: per esempio se l'ASG prova a creare un server e fallisce di continuo.
+Perché due cose diverse? Una sostituzione normale (dispensa 9) dura 5-7 minuti: l'allarme a 10 minuti **non suona**, ed è giusto, perché non c'è niente da fare. Ma così non sapresti nemmeno che è successo. Le **notifiche** ti dicono "il server è stato tolto" e "ne è stato creato uno nuovo" in pochi secondi, ogni volta. L'allarme suona solo se il problema **dura**: per esempio se l'ASG prova a creare un server e fallisce di continuo.
 
 La metrica `GroupInServiceInstances` l'ASG la pubblica solo se glielo chiedi, con `enabled_metrics` (sezione 9).
 
@@ -135,7 +135,7 @@ Il controllo di readiness deve essere **veloce** (un timeout di pochi secondi) e
 
 ## 6. Il watchdog: far sostituire il server quando l'app non è pronta
 
-L'ASG controlla solo la macchina (`health_check_type = "EC2"`, dispensa 8). Non c'è un bilanciatore davanti al server che possa controllare l'applicazione al posto suo. Quindi lo fa il server stesso, con un **watchdog** (il "cane da guardia"): uno script che un timer di systemd lancia **ogni minuto**.
+L'ASG controlla solo la macchina (`health_check_type = "EC2"`, dispensa 9). Non c'è un bilanciatore davanti al server che possa controllare l'applicazione al posto suo. Quindi lo fa il server stesso, con un **watchdog** (il "cane da guardia"): uno script che un timer di systemd lancia **ogni minuto**.
 
 ```mermaid
 flowchart TD
@@ -198,6 +198,12 @@ variable "heartbeat_url" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "db_performance_insights" {
+  description = "Performance Insights sul database (non tutte le taglie lo supportano)"
+  type        = bool
+  default     = false
 }
 ```
 
@@ -325,12 +331,9 @@ data "aws_iam_policy_document" "app_watchdog" {
     ]
   }
 
-  dynamic "statement" {
-    for_each = var.heartbeat_url == "" ? [] : [1]
-    content {
-      actions   = ["secretsmanager:GetSecretValue"]
-      resources = aws_secretsmanager_secret.heartbeat[*].arn
-    }
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.heartbeat.arn]
   }
 }
 
@@ -349,14 +352,12 @@ resource "aws_iam_role_policy_attachment" "app_watchdog" {
 # ---------------------------------------------------------------
 
 resource "aws_secretsmanager_secret" "heartbeat" {
-  count = var.heartbeat_url == "" ? 0 : 1
-  name  = "${var.project}/heartbeat-url"
+  name = "${var.project}/heartbeat-url"
 }
 
 resource "aws_secretsmanager_secret_version" "heartbeat" {
-  count         = var.heartbeat_url == "" ? 0 : 1
-  secret_id     = aws_secretsmanager_secret.heartbeat[0].id
-  secret_string = var.heartbeat_url
+  secret_id     = aws_secretsmanager_secret.heartbeat.id
+  secret_string = var.heartbeat_url != "" ? var.heartbeat_url : "nessuno"
 }
 ```
 
@@ -366,8 +367,8 @@ Dentro il blocco `aws_db_instance.main`:
 
 ```hcl
   # Osservare il database
-  performance_insights_enabled          = true
-  performance_insights_retention_period = 7 # il livello incluso
+  performance_insights_enabled          = var.db_performance_insights
+  performance_insights_retention_period = var.db_performance_insights ? 7 : null
   monitoring_interval                   = 60 # Enhanced Monitoring: ogni minuto
   monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
   enabled_cloudwatch_logs_exports       = ["postgresql", "upgrade"]
@@ -386,7 +387,7 @@ Nel blocco `aws_autoscaling_group.app`, una riga in più:
 Nella mappa di `templatefile` del launch template, un valore in più:
 
 ```hcl
-    heartbeat_secret_arn = try(aws_secretsmanager_secret.heartbeat[0].arn, "")
+    heartbeat_secret_arn = aws_secretsmanager_secret.heartbeat.arn
 ```
 
 ### user_data.sh.tpl (aggiunta in fondo)
@@ -397,12 +398,11 @@ Nella mappa di `templatefile` del launch template, un valore in più:
 mkdir -p /var/lib/app-watchdog
 touch /var/lib/app-watchdog/avvio
 
-HEARTBEAT_ARN="${heartbeat_secret_arn}"
-if [ -n "$HEARTBEAT_ARN" ]; then
-  aws secretsmanager get-secret-value --secret-id "$HEARTBEAT_ARN" \
-    --query SecretString --output text > /etc/app/heartbeat-url
-  chmod 600 /etc/app/heartbeat-url
-fi
+URL=$(aws secretsmanager get-secret-value --secret-id ${heartbeat_secret_arn} \
+  --query SecretString --output text)
+case "$URL" in
+  https://*) echo "$URL" > /etc/app/heartbeat-url; chmod 600 /etc/app/heartbeat-url ;;
+esac
 
 cat > /usr/local/bin/app-watchdog <<'SCRIPT'
 #!/bin/bash
@@ -516,11 +516,13 @@ In `db_storage` la soglia è scritta come un calcolo, `2 * 1024 * 1024 * 1024`: 
 
 **`aws_cloudwatch_log_group.db`** crea i due log group dei log di PostgreSQL, con `for_each` su un insieme di due nomi (`toset`, dispensa 2) e `retention_in_days = 30`: dopo 30 giorni le righe si cancellano da sole. In `rds.tf`, il `depends_on` li fa creare **prima** del database, così RDS trova quelli con la scadenza invece di crearne di suoi senza.
 
-**`data.aws_iam_policy_document.app_watchdog`** dà al server il permesso `SetInstanceHealth` solo sul suo ASG. L'ARN di un ASG contiene un identificativo che AWS sceglie alla creazione: lo sostituiamo con `*` e lasciamo fisso il **nome** dell'ASG. Il blocco **`dynamic "statement"`** è nuovo: crea un blocco `statement` **per ogni elemento** della lista in `for_each`. Con la lista vuota (`[]`) non ne crea nessuno; con `[1]` ne crea uno. È il modo di scrivere "questo blocco solo se il dead man's switch è attivo". Dentro, `aws_secretsmanager_secret.heartbeat[*].arn` è la lista degli ARN di tutte le copie del segreto (zero o una): il `[*]` vuol dire "di ogni copia".
+**`data.aws_iam_policy_document.app_watchdog`** dà al server il permesso `SetInstanceHealth` solo sul suo ASG. L'ARN di un ASG contiene un identificativo che AWS sceglie alla creazione: lo sostituiamo con `*` e lasciamo fisso il **nome** dell'ASG. Il secondo statement gli permette di leggere il segreto del dead man's switch, e nessun altro.
 
-**`aws_secretsmanager_secret.heartbeat`** e la sua versione usano **`count`**: un altro modo, più semplice di `for_each`, di dire **quante copie** creare di una risorsa. `count = var.heartbeat_url == "" ? 0 : 1` è il condizionale della dispensa 0: zero copie se la variabile è vuota, una se c'è. Una risorsa con `count` si legge con l'indice: `aws_secretsmanager_secret.heartbeat[0]`. `sensitive = true` sulla variabile dice a Terraform di non mostrarla nel `plan`; il valore finisce comunque nello state, come ogni segreto gestito da Terraform (dispensa 6).
+**`aws_secretsmanager_secret.heartbeat`** e la sua versione creano **sempre** il segreto, anche se il dead man's switch non lo usi: il valore è l'indirizzo, oppure la parola `nessuno` (un segreto non può essere vuoto). Lo script di avvio usa il valore solo se inizia con `https://`. Così il codice resta uguale in tutti e due i casi. `sensitive = true` sulla variabile dice a Terraform di non mostrarla nel `plan`; il valore finisce comunque nello state, come ogni segreto gestito da Terraform (dispensa 6).
 
-**In `deploy.tf`**, `enabled_metrics` chiede all'ASG di pubblicare la metrica dei server in funzione. **`try(…, "")`** prova a calcolare il primo valore, e se non ci riesce (la risorsa non esiste, perché `count = 0`) usa il secondo: l'ARN del segreto, oppure un testo vuoto.
+**`db_performance_insights`** è una variabile vero/falso (`bool`), spenta di default. In `rds.tf`, `performance_insights_retention_period` usa il condizionale della dispensa 0: 7 giorni se è accesa, altrimenti `null`, cioè "come se la riga non ci fosse".
+
+**In `deploy.tf`**, `enabled_metrics` chiede all'ASG di pubblicare la metrica dei server in funzione, e lo script riceve l'ARN del segreto del dead man's switch. Lo script lo legge una volta, all'avvio: il comando `case … in https://*)` vuol dire "se il testo inizia con `https://`, scrivilo nel file".
 
 **Lo script `app-watchdog`** è il diagramma della sezione 6. `stat -c %Y` legge l'ora in cui è stato creato il file `avvio`, cioè l'avvio del server: la differenza con l'ora attuale è l'"età" del server in secondi. `curl -f` considera un errore ogni risposta diversa da 2xx, quindi anche il `503` della readiness. Il contatore dei fallimenti sta in un file, perché lo script parte e finisce ogni minuto e non ricorderebbe niente. Quello che lo script scrive con `echo` finisce nel registro di systemd: si legge con `journalctl -u app-watchdog`.
 
@@ -564,11 +566,11 @@ Obiettivo: ricevere i primi allarmi, poi rompere l'applicazione (non la macchina
 
    (Atteso: ogni minuto una riga *app non pronta: fallimento 1 di 5*, poi 2, 3… al quinto *segno i-… come Unhealthy*. La sessione si chiude quando il server viene tolto. Dalla mail: *Terminating EC2 instance*, poi *Launching a new EC2 instance*. Dopo qualche minuto, `curl` da casa funziona di nuovo.)
 
-   Perché `restart: always` (dispensa 8) non ha fatto ripartire il container? Perché lo hai fermato **tu**, a mano: docker compose rispetta la scelta. È proprio il caso di un'app "bloccata" che nessun altro meccanismo avrebbe risolto.
+   Perché `restart: always` (dispensa 9) non ha fatto ripartire il container? Perché lo hai fermato **tu**, a mano: docker compose rispetta la scelta. È proprio il caso di un'app "bloccata" che nessun altro meccanismo avrebbe risolto.
 8. **La pausa.** Sul server nuovo, crea `/etc/app/watchdog-pausa` (`sudo touch …`), invecchia il file di avvio e ferma di nuovo l'app come al passo 7. Guarda `journalctl -u app-watchdog` per 6-7 minuti: nessun fallimento contato. Togli il file di pausa (`sudo rm …`) e riavvia l'app: `sudo docker compose --project-directory /etc/app start app`.
-9. **Il database.** In console: **RDS → corso-aws-db → Monitoring**: le metriche di CPU e memoria, e i grafici di Enhanced Monitoring (*OS metrics*). Poi **Performance Insights** (o *Database Insights*): fai qualche `curl` da casa e guarda comparire la query `INSERT INTO visite`. Infine **CloudWatch → Log groups → /aws/rds/instance/corso-aws-db/postgresql**: i messaggi di PostgreSQL, con la scadenza di 30 giorni.
+9. **Il database.** In console: **RDS → corso-aws-db → Monitoring**: le metriche di CPU e memoria, e i grafici di Enhanced Monitoring (*OS metrics*). Se hai acceso `db_performance_insights`, apri **Performance Insights** (o *Database Insights*): fai qualche `curl` da casa e guarda comparire la query `INSERT INTO visite`. Infine **CloudWatch → Log groups → /aws/rds/instance/corso-aws-db/postgresql**: i messaggi di PostgreSQL, con la scadenza di 30 giorni.
 10. **Il dead man's switch** (facoltativo). Su healthchecks.io crea un controllo con periodo **1 minuto** e tolleranza **5 minuti**, e copia il suo indirizzo. In `terraform.tfvars`: `heartbeat_url = "https://hc-ping.com/…"`, poi `terraform apply` (il server viene sostituito per leggere il segreto). Dopo qualche minuto il controllo diventa verde. Ora ferma l'app come al passo 7, **con** il file di pausa (così il watchdog non sostituisce il server): dopo circa 6 minuti healthchecks.io ti manda la mail "down". Nessun allarme di AWS è stato coinvolto. Togli la pausa e riavvia l'app: torna verde.
-11. **Pulizia.** Come nella dispensa 8: `db_deletion_protection = false`, `apply`, `destroy`, e cancella lo snapshot finale. Se hai usato healthchecks.io, metti in pausa il controllo, altrimenti ti avviserà che è tutto giù (ed è vero).
+11. **Pulizia.** Come nella dispensa 9: `db_deletion_protection = false`, `apply`, `destroy`, e cancella lo snapshot finale. Se hai usato healthchecks.io, metti in pausa il controllo, altrimenti ti avviserà che è tutto giù (ed è vero).
 
 ### Domande di verifica
 

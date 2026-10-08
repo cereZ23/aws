@@ -48,13 +48,11 @@ Parole che compaiono da subito. Tutte le altre le spieghiamo quando servono.
 | **Tag** | Etichette `chiave = valore` attaccate a una risorsa, per ritrovarla e per attribuirne i costi |
 | **HCL** | HashiCorp Configuration Language: il linguaggio in cui si scrivono i file `.tf` |
 | **Git / commit** | Git è lo strumento che conserva la storia dei file di testo; fare un *commit* significa salvarne una versione. Nel corso è consigliato, non obbligatorio |
-| **Pipeline / CI** | Un sistema automatico che, a ogni modifica del codice, esegue comandi al posto tuo (test, `terraform plan`…) |
-
 ---
 
 ## 1. Perché non si clicca in console
 
-Creare risorse a mano dalla console AWS funziona la prima volta. Il problema arriva dopo: nessuno ricorda cosa è stato cliccato, non si può rifare identico in un altro ambiente, non c'è revisione delle modifiche, non c'è storia.
+Creare risorse a mano dalla console AWS funziona la prima volta. Il problema arriva dopo: nessuno ricorda cosa è stato cliccato e non si può rifare identico altrove. Non c'è revisione, non c'è storia.
 
 **Infrastructure as Code** significa descrivere l'infrastruttura in file di testo che:
 
@@ -62,7 +60,7 @@ Creare risorse a mano dalla console AWS funziona la prima volta. Il problema arr
 - si possono applicare in modo ripetibile (sviluppo, collaudo, produzione identici);
 - documentano da soli cosa esiste e perché.
 
-Terraform è **dichiarativo**: non scrivi i passi ("crea questo, poi quest'altro"), scrivi lo **stato desiderato** ("voglio che esista questo"). Terraform confronta ciò che hai scritto con ciò che esiste e calcola da solo cosa creare, modificare o distruggere.
+Terraform è **dichiarativo**: non scrivi i passi ("crea questo, poi quest'altro"), scrivi lo **stato desiderato** ("voglio che esista questo"). Terraform confronta ciò che hai scritto con ciò che esiste. Poi calcola da solo cosa creare, modificare o distruggere.
 
 > **Analogia.** Uno script è una ricetta: "rompi le uova, sbatti, cuoci". Terraform è la foto del piatto finito: gli dai la foto e lui capisce cosa manca in cucina.
 
@@ -74,7 +72,7 @@ Terraform è **dichiarativo**: non scrivi i passi ("crea questo, poi quest'altro
 |---|---|
 | `terraform {}` | Versione di Terraform, provider richiesti, backend dello state |
 | `provider` | Il "driver" verso una piattaforma (AWS, Azure, ecc.) |
-| `resource` | Una cosa da creare e gestire (un bucket, una VPC, un'istanza) |
+| `resource` | Una cosa da creare e gestire (un bucket, una rete, un server) |
 | `data` | Una cosa da **leggere** che esiste già, senza gestirla |
 | `variable` | Un input parametrico |
 | `locals` | Valori calcolati riutilizzabili all'interno del codice |
@@ -94,7 +92,7 @@ Si fa riferimento a una risorsa con `tipo.nome.attributo`, per esempio `aws_s3_b
 
 ### Le dipendenze si capiscono da sole
 
-Quando una risorsa usa un attributo di un'altra, Terraform capisce che deve crearle in ordine. Non serve dirglielo:
+Quando una risorsa usa un attributo di un'altra, Terraform capisce che deve crearle in ordine. Non serve dirglielo. Qui attiviamo il **versioning** di un bucket (S3 conserva le vecchie copie dei file):
 
 ```hcl
 resource "aws_s3_bucket_versioning" "demo" {
@@ -156,125 +154,16 @@ Gli **argomenti** li decidi tu, gli **attributi** li scopri dopo la creazione. P
 
 ### Le espressioni: dove il codice diventa dinamico
 
-**Il problema.** Vogliamo un bucket per i log sia nell'ambiente di sviluppo (`dev`) sia in produzione (`prod`). Se scriviamo il nome a mano, `bucket = "corso-aws-dev-logs"`, per `prod` dobbiamo copiare il file e cambiare i nomi dappertutto, e prima o poi ci si dimentica un pezzo. Vogliamo invece scrivere il codice **una volta sola** e cambiare **un solo valore**, l'ambiente, nel `terraform.tfvars`. Per farlo, il codice deve saper *calcolare* nomi e impostazioni a partire da quel valore.
+Vogliamo scrivere il codice **una volta sola** e usarlo sia per lo sviluppo (`dev`) sia per la produzione (`prod`), cambiando un solo valore. Per questo il codice deve saper *calcolare* nomi e impostazioni.
 
-Un'**espressione** è proprio questo: un pezzo di codice che Terraform calcola, al posto di un valore scritto fisso.
-
-#### Come nasce il nome del bucket: dove sta ogni pezzo
-
-Il nome finale sarà `corso-aws-dev-logs`. I suoi pezzi stanno in **tre file diversi** della stessa cartella:
-
-**File `terraform.tfvars`**: qui scrivi i valori scelti.
-
-```hcl
-project     = "corso-aws"
-environment = "dev"
-```
-
-**File `variables.tf`**: qui dichiari che quei campi esistono. I nomi devono essere identici a quelli del tfvars.
-
-```hcl
-variable "project" {}
-variable "environment" {}
-```
-
-**File `main.tf`**: qui usi i valori per costruire il nome.
-
-```hcl
-locals {
-  prefix = "${var.project}-${var.environment}"
-}
-
-resource "aws_s3_bucket" "logs" {
-  bucket = "${local.prefix}-logs"
-}
-```
-
-Il percorso di ogni pezzo, da un file all'altro:
-
-```mermaid
-flowchart LR
-    subgraph T["terraform.tfvars"]
-        TP["project = &quot;corso-aws&quot;"]
-        TE["environment = &quot;dev&quot;"]
-    end
-    subgraph V["variables.tf"]
-        VP["variable &quot;project&quot;"]
-        VE["variable &quot;environment&quot;"]
-    end
-    subgraph MT["main.tf"]
-        L["locals: prefix =<br/>&quot;corso-aws-dev&quot;"]
-        B["bucket =<br/>&quot;corso-aws-dev-logs&quot;"]
-    end
-    TP --> VP -->|"var.project"| L
-    TE --> VE -->|"var.environment"| L
-    L -->|"local.prefix + -logs"| B
-    B -->|"terraform apply"| AWS(("bucket in AWS"))
-    classDef proj fill:#FDE3C0,stroke:#F28C28,color:#000
-    classDef env fill:#D6F2DF,stroke:#2E9E6B,color:#000
-    classDef pre fill:#E6DEFF,stroke:#5B3FD0,color:#000
-    class TP,VP proj
-    class TE,VE env
-    class L,B pre
-```
-
-**Passo 1: i valori** (`terraform.tfvars` e `variables.tf`). Nel tfvars scrivi `project = "corso-aws"` ed `environment = "dev"`; in `variables.tf` dichiari che i campi `project` ed `environment` esistono. Da qui in poi, in qualunque file `.tf` della cartella:
-
-```
-var.project      vale  "corso-aws"
-var.environment  vale  "dev"
-```
-
-**Passo 2: il prefisso** (`main.tf`, blocco `locals`). Terraform sostituisce ogni `${ … }` con il suo valore; il trattino in mezzo resta com'è:
-
-```
-"${var.project}-${var.environment}"
-      ↓               ↓
-"corso-aws"   -     "dev"        →   local.prefix = "corso-aws-dev"
-```
-
-**Passo 3: il nome** (`main.tf`, la risorsa `aws_s3_bucket`). Terraform sostituisce `${local.prefix}` e attacca `-logs`:
-
-```
-"${local.prefix}-logs"
-        ↓
-"corso-aws-dev" + "-logs"        →   bucket = "corso-aws-dev-logs"
-```
-
-Con `terraform apply`, in AWS nasce un bucket con esattamente quel nome: lo vedi nella console.
-
-#### E il versioning solo in produzione
-
-Il **versioning** (conservare le vecchie copie dei file) lo vogliamo solo in produzione. Si aggiunge in `main.tf`:
-
-```hcl
-resource "aws_s3_bucket_versioning" "logs" {
-  bucket = aws_s3_bucket.logs.id
-  versioning_configuration {
-    status = var.environment == "prod" ? "Enabled" : "Suspended"
-  }
-}
-```
-
-- `aws_s3_bucket.logs.id` è l'identificativo del bucket appena creato: il versioning va su quel bucket, e siccome lo usa, Terraform crea prima il bucket.
-- `var.environment == "prod" ? "Enabled" : "Suspended"` si legge "se l'ambiente è prod usa `Enabled`, altrimenti `Suspended`". Con `"dev"` la condizione è falsa, quindi `"Suspended"`.
-
-Il vantaggio: stesso codice, due ambienti.
-
-| Valore calcolato | `environment = "dev"` | `environment = "prod"` |
-|---|---|---|
-| `local.prefix` | `"corso-aws-dev"` | `"corso-aws-prod"` |
-| nome del bucket | `"corso-aws-dev-logs"` | `"corso-aws-prod-logs"` |
-| versioning | `"Suspended"` | `"Enabled"` |
-
-Ora le quattro famiglie di espressioni una per una.
+Un'**espressione** è proprio questo: un pezzo di codice che Terraform calcola, al posto di un valore scritto fisso. Ce ne sono quattro famiglie. Qui vediamo la sintassi; un esempio completo, file per file, arriva nella sezione 3.
 
 **Riferimenti**: "prendi il valore che sta là". Il prefisso dice dove cercarlo:
 
-| Scrivi | Dove lo cerca | Nell'esempio vale |
+| Scrivi | Dove lo cerca | Esempio di valore |
 |---|---|---|
-| `var.environment` | una variabile: il valore arriva dal tfvars | `"dev"` |
-| `local.prefix` | un valore calcolato in un blocco `locals` | `"corso-aws-dev"` |
+| `var.environment` | una variabile: il valore lo scegli tu (sezione 3) | `"dev"` |
+| `local.prefix` | un valore calcolato in un blocco `locals` (sezione 3) | `"corso-aws-dev"` |
 | `aws_s3_bucket.logs.id` | un attributo di una risorsa creata da noi | `"corso-aws-dev-logs"` |
 | `data.aws_caller_identity.current.account_id` | un dato letto da AWS (un *data source*) | il numero dell'account |
 
@@ -301,22 +190,7 @@ status = var.environment == "prod" ? "Enabled" : "Suspended"
 #        condizione                  se vera     se falsa
 ```
 
-### Provare senza paura: terraform console
-
-`terraform console` apre un prompt dove puoi scrivere espressioni e vedere il risultato, senza creare né modificare niente. È il modo più rapido per capire un pezzo di codice che non ti torna.
-
-Si lancia **dentro la cartella del progetto, dopo `terraform init`** (sezione 4). Le funzioni come `lower(...)` funzionano sempre; `var.qualcosa` funziona solo se quella variabile è dichiarata nei file della cartella (l'esempio sotto presuppone `project` ed `environment`, che vedremo nella sezione 3). Si esce con `exit`.
-
-```
-$ terraform console
-> lower("Corso-AWS")
-"corso-aws"
-> "${var.project}-${var.environment}"
-"corso-aws-dev"
-> var.environment == "prod" ? "Enabled" : "Suspended"
-"Suspended"
-> exit
-```
+Con `environment = "dev"` la condizione è falsa e il risultato è `"Suspended"`. Le espressioni si possono provare dal vivo con `terraform console`: lo vediamo nella sezione 4.
 
 Più avanti incontreremo costrutti per creare **più copie della stessa risorsa** (`for_each`) e per trasformare liste e mappe (le espressioni `for`): li vediamo nella dispensa 2, dove servono per la prima volta.
 
@@ -344,17 +218,6 @@ infra/
 └── terraform.tfvars   # VALORI degli input per questo ambiente
 ```
 
-### Il flusso in un colpo d'occhio
-
-```mermaid
-flowchart LR
-    TFV["terraform.tfvars<br/>i valori"] --> VAR["variables.tf<br/>i campi del questionario"]
-    VAR --> MAIN["main.tf<br/>usa var.xxx"]
-    MAIN --> OUT["outputs.tf<br/>il risultato"]
-    PROV["providers.tf<br/>con cosa parlo"] -.-> MAIN
-    BACK["backend.tf<br/>dove salvo lo state"] -.-> MAIN
-```
-
 > **Analogia.** `variables.tf` è un questionario con i campi vuoti ("Nome progetto: ____, Regione: ____"). `terraform.tfvars` è lo stesso questionario compilato. `main.tf` è l'ufficio che lavora sul questionario compilato. `outputs.tf` è la ricevuta che ti danno allo sportello.
 
 ### Da dove prende cosa
@@ -370,24 +233,9 @@ Quando lanci un comando `terraform`, il programma raccoglie quattro cose, tutte 
 
 E produce due cose: le **risorse in AWS** e l'inventario aggiornato, il file **`terraform.tfstate`** (sezione 5).
 
-### Il percorso di un valore
+Vediamo i file uno per uno: cosa contengono e quando cambiano.
 
-Per vedere come un valore passa da un file all'altro, seguiamo `environment` dall'inizio alla fine:
-
-| Passo | File | Codice | Cosa succede |
-|---|---|---|---|
-| 1 | `terraform.tfvars` | `environment = "dev"` | scrivi il valore scelto |
-| 2 | `variables.tf` | `variable "environment" {}` | dichiari che il campo esiste (senza, Terraform dà errore) |
-| 3 | `main.tf` | `var.environment` | lo leggi: vale `"dev"` |
-| 4 | `main.tf`, blocco `locals` | `"${var.project}-${var.environment}"` | lo usi per calcolare un prefisso: `"corso-aws-dev"` |
-| 5 | `main.tf`, una `resource` | `bucket = "${local.prefix}-logs"` | lo usi nel nome del bucket: `"corso-aws-dev-logs"` |
-| 6 | in AWS | `terraform apply` | il bucket nasce con quel nome |
-
-I costrutti usati ai passi 3-5 (`var.`, `local.`, `${ }`) sono spiegati nella sezione 2, alla voce "Le espressioni".
-
-Vediamo i file uno per uno: cosa contengono, quando cambiano e gli errori tipici.
-
-> **Attenzione: in questa sezione gli esempi servono a mostrare la sintassi, non vanno copiati.** Alcuni citano risorse che costruiremo più avanti (un database, delle istanze). I file esatti da creare per provare sono nell'esercizio, alla sezione 7.
+> **Attenzione: in questa sezione gli esempi servono a mostrare la sintassi, non vanno copiati.** I file esatti da creare per provare sono nell'esercizio, alla sezione 7.
 
 ---
 
@@ -431,20 +279,7 @@ provider "aws" {
 }
 ```
 
-**Quando cambia:** raramente. Quando si aggiorna la versione di un provider o se ne aggiunge uno nuovo, e ogni volta va rilanciato `terraform init`.
-
-**Da sapere:** puoi avere più configurazioni dello stesso provider con un `alias`, per esempio quando alcune risorse devono stare in un'altra regione:
-
-```hcl
-provider "aws" {
-  alias  = "virginia"
-  region = "us-east-1"
-}
-
-# e nella risorsa:  provider = aws.virginia
-```
-
-Le versioni esatte scaricate finiscono nel file `.terraform.lock.hcl`, che si genera da solo e **va committato**: garantisce che tutti usino la stessa identica versione del provider.
+`default_tags` aggiunge questi tag a ogni risorsa AWS creata dal progetto, senza doverli ripetere. Se aggiorni o aggiungi un provider, va rilanciato `terraform init`.
 
 ---
 
@@ -464,14 +299,12 @@ terraform {
 }
 ```
 
-**Perché un file a parte**, se è un blocco `terraform` come quello di `providers.tf`? Perché ha regole diverse e cambiarlo è un'operazione delicata:
+**Perché un file a parte**, se è un blocco `terraform` come quello di `providers.tf`? Perché ha regole diverse:
 
-- **non accetta variabili**: niente `var.region` qui dentro, i valori vanno scritti o passati con `terraform init -backend-config=file.hcl`;
-- **se lo modifichi, lo state va spostato**: serve `terraform init -migrate-state` (sposta lo state nel nuovo posto) o `-reconfigure` (riparte ignorando il vecchio). Sbagliare qui significa che Terraform "dimentica" l'infrastruttura.
+- **non accetta variabili**: niente `var.region` qui dentro, i valori si scrivono per esteso;
+- **cambiarlo è delicato**: lo state va spostato nel nuovo posto con `terraform init -migrate-state` (lo facciamo al passo 7 dell'esercizio). Se si sbaglia, Terraform "dimentica" l'infrastruttura.
 
-Tenerlo isolato rende evidente, in una code review, che qualcuno sta toccando il backend.
-
-**Quando cambia:** quasi mai.
+In un file a parte, chi rilegge il codice vede subito che qualcuno sta toccando il backend.
 
 ---
 
@@ -490,11 +323,6 @@ variable "project" {
   description = "Prefisso per i nomi delle risorse"
   type        = string
   # nessun default: è OBBLIGATORIA
-
-  validation {
-    condition     = can(regex("^[a-z0-9-]{3,20}$", var.project))
-    error_message = "Solo minuscole, numeri e trattini, da 3 a 20 caratteri."
-  }
 }
 
 variable "environment" {
@@ -505,24 +333,16 @@ variable "environment" {
     error_message = "Valori ammessi: dev, test, prod."
   }
 }
-
-variable "db_password" {
-  description = "Password del database"
-  type        = string
-  sensitive   = true   # non viene stampata nel plan né nell'output
-}
 ```
 
 I punti da capire:
 
-- **Senza `default` la variabile è obbligatoria.** Se nessuno la valorizza, Terraform la chiede a video o si ferma con un errore.
+- **Senza `default` la variabile è obbligatoria.** Se nessuno le dà un valore, Terraform lo chiede a video o si ferma con un errore.
 - **`type`** evita errori stupidi. Oltre a `string` esistono `number`, `bool`, `list(string)`, `map(string)` e `object({...})` per strutture più complesse.
 - **`validation`** blocca valori sbagliati già al `plan`, prima di toccare AWS.
-- **`sensitive = true`** nasconde il valore a video, ma **non** lo cifra nello state: lì resta in chiaro. Per le password vere la strada giusta è non farle passare da Terraform (per esempio con Secrets Manager, come vedremo per RDS).
+- **`sensitive = true`** (un argomento in più nel blocco) nasconde il valore a video. Ma **non** lo cifra nello state: lì resta in chiaro. Per le password vere la strada giusta è non farle passare da Terraform (lo vediamo nella dispensa 6).
 
 Nel codice una variabile si usa con `var.nome`, per esempio `var.region`.
-
-**Quando cambia:** quando il progetto ha bisogno di un nuovo parametro.
 
 ---
 
@@ -536,78 +356,89 @@ environment = "dev"
 region      = "eu-south-1"
 ```
 
-Terraform carica **automaticamente** solo due tipi di file: `terraform.tfvars` e qualunque file che finisce in `.auto.tfvars`. Tutti gli altri vanno indicati esplicitamente:
+Terraform lo legge **da solo**, perché ha esattamente quel nome. Il valore scritto qui vince sul `default` di `variables.tf`.
 
-```bash
-terraform plan -var-file=envs/prod.tfvars
-```
+Per provare un valore diverso **senza toccare i file** c'è l'opzione `-var`, per esempio `terraform plan -var environment=prod`: vale per quel solo comando e vince su tutto. La useremo nella dispensa 2.
 
-**Da dove può arrivare il valore di una variabile**, dalla priorità più bassa alla più alta (l'ultimo vince):
-
-1. il `default` in `variables.tf`;
-2. le variabili d'ambiente `TF_VAR_nome` (es. `export TF_VAR_region=eu-west-1`);
-3. `terraform.tfvars`;
-4. i file `*.auto.tfvars`, in ordine alfabetico;
-5. `-var` e `-var-file` sulla riga di comando.
-
-Questo spiega i casi in cui "ho cambiato il tfvars ma non succede niente": probabilmente c'è un `-var` o un `.auto.tfvars` che lo sovrascrive.
-
-**Si committa?** Sì, **se non contiene segreti**: così è documentato con che valori gira ogni ambiente. I segreti non vanno mai nei tfvars: si passano con `TF_VAR_...` dalla pipeline o, meglio, non passano da Terraform affatto.
-
-**Quando cambia:** ogni volta che cambia la configurazione di un ambiente (dimensione di un'istanza, numero di repliche, ecc.).
+**Si committa?** Sì, **se non contiene segreti**: così è documentato con che valori gira ogni ambiente. I segreti non vanno mai nei tfvars.
 
 ---
 
 ### main.tf: le risorse
 
-Qui sta l'infrastruttura vera: blocchi `resource`, `data` e `locals`.
-
-```hcl
-locals {
-  # valori calcolati, riutilizzabili: si usano con local.nome
-  name_prefix = "${var.project}-${var.environment}"
-}
-
-data "aws_caller_identity" "current" {}   # legge l'account in uso
-
-resource "aws_s3_bucket" "demo" {
-  bucket = "${local.name_prefix}-demo-${data.aws_caller_identity.current.account_id}"
-}
-```
-
-#### Variable o local: chi decide il valore?
-
-Un **local** è un nome che dai a un calcolo, per scriverlo una volta sola e riusarlo. Esempio: tre bucket con lo stesso prefisso.
-
-Senza locals, la stessa formula è ripetuta tre volte (e se un giorno cambia, va corretta in tre posti):
-
-```hcl
-bucket = "${var.project}-${var.environment}-logs"
-bucket = "${var.project}-${var.environment}-dati"
-bucket = "${var.project}-${var.environment}-backup"
-```
-
-Con i locals, la formula si scrive una volta e le si dà un nome, `prefix`. Terraform la calcola (qui: `"corso-aws-dev"`) e ogni bucket la usa con `local.prefix`:
+Qui sta l'infrastruttura vera: blocchi `resource`, `data` e `locals`. Un **local** è un nome che dai a un calcolo: lo scrivi una volta sola e lo riusi dove serve, con `local.nome`.
 
 ```hcl
 locals {
   prefix = "${var.project}-${var.environment}"
 }
 
-bucket = "${local.prefix}-logs"
-bucket = "${local.prefix}-dati"
-bucket = "${local.prefix}-backup"
+resource "aws_s3_bucket" "logs" {
+  bucket = "${local.prefix}-logs"
+}
+
+resource "aws_s3_bucket_versioning" "logs" {
+  bucket = aws_s3_bucket.logs.id
+  versioning_configuration {
+    status = var.environment == "prod" ? "Enabled" : "Suspended"
+  }
+}
 ```
 
-La differenza, in una tabella:
+#### Il percorso di un valore: come nasce il nome del bucket
+
+Ora mettiamo insieme i tre file. I pezzi del nome `corso-aws-dev-logs` partono dal tfvars, passano per `variables.tf` e arrivano in `main.tf`:
+
+```mermaid
+flowchart LR
+    subgraph T["terraform.tfvars"]
+        TP["project = &quot;corso-aws&quot;"]
+        TE["environment = &quot;dev&quot;"]
+    end
+    subgraph V["variables.tf"]
+        VP["variable &quot;project&quot;"]
+        VE["variable &quot;environment&quot;"]
+    end
+    subgraph MT["main.tf"]
+        L["locals: prefix =<br/>&quot;corso-aws-dev&quot;"]
+        B["bucket =<br/>&quot;corso-aws-dev-logs&quot;"]
+    end
+    TP --> VP -->|"var.project"| L
+    TE --> VE -->|"var.environment"| L
+    L -->|"local.prefix + -logs"| B
+    B -->|"terraform apply"| AWS(("bucket in AWS"))
+    classDef proj fill:#FDE3C0,stroke:#F28C28,color:#000
+    classDef env fill:#D6F2DF,stroke:#2E9E6B,color:#000
+    classDef pre fill:#E6DEFF,stroke:#5B3FD0,color:#000
+    class TP,VP proj
+    class TE,VE env
+    class L,B pre
+```
+
+Passo per passo: Terraform sostituisce ogni `${ … }` con il suo valore, il resto del testo resta com'è.
+
+```
+var.project = "corso-aws"     var.environment = "dev"          (dal tfvars)
+"${var.project}-${var.environment}"   →   local.prefix = "corso-aws-dev"
+"${local.prefix}-logs"                →   bucket = "corso-aws-dev-logs"
+```
+
+Con `terraform apply`, in AWS nasce un bucket con esattamente quel nome. Il vantaggio: stesso codice, due ambienti. Cambia solo una riga del tfvars.
+
+| Valore calcolato | `environment = "dev"` | `environment = "prod"` |
+|---|---|---|
+| `local.prefix` | `"corso-aws-dev"` | `"corso-aws-prod"` |
+| nome del bucket | `"corso-aws-dev-logs"` | `"corso-aws-prod-logs"` |
+| versioning | `"Suspended"` | `"Enabled"` |
+
+#### Variable o local: chi decide il valore?
 
 | | `variable` | `local` |
 |---|---|---|
 | **Chi decide il valore?** | **tu**, scrivendolo nel tfvars | **Terraform**, con una formula scritta nel codice |
 | **Dove si scrive?** | dichiarata in `variables.tf`, valore in `terraform.tfvars` | nel blocco `locals { … }` |
 | **Cambia tra dev e prod?** | sì: lo cambi tu nel tfvars | sì, ma da solo: si ricalcola dalle variabili |
-| **Come si legge?** | `var.environment` | `local.prefix` |
-| **Nell'esempio vale** | `"dev"` | `"corso-aws-dev"` |
+| **Come si legge?** | `var.environment` → `"dev"` | `local.prefix` → `"corso-aws-dev"` |
 
 > **Analogia.** Le variabili sono gli ingredienti che porti tu (dal tfvars). Un local è una preparazione fatta in cucina con quegli ingredienti, come un soffritto, che poi usi in più piatti.
 
@@ -618,21 +449,18 @@ infra/
 ├── providers.tf
 ├── backend.tf
 ├── variables.tf
-├── locals.tf
 ├── iam.tf        # role e policy
 ├── vpc.tf        # rete, subnet, route table
 ├── security.tf   # security group e NACL
 ├── ec2.tf        # il server
 ├── tailscale.tf  # accesso remoto (VPN)
 ├── rds.tf        # database
-├── s3.tf         # bucket artefatti
 ├── outputs.tf
-└── terraform.tfvars
+├── terraform.tfvars
+└── …             # e altri file nelle dispense successive
 ```
 
 Ricorda la prima regola: per Terraform non cambia niente, è sempre un'unica configurazione. Una risorsa in `ec2.tf` può usare liberamente una subnet definita in `vpc.tf`.
-
-**Quando cambia:** continuamente, è il file di lavoro.
 
 ---
 
@@ -643,29 +471,17 @@ Gli output sono i valori che il progetto espone alla fine di un `apply`.
 ```hcl
 output "bucket_name" {
   description = "Nome del bucket creato"
-  value       = aws_s3_bucket.demo.bucket
-}
-
-output "db_endpoint" {
-  description = "Endpoint del database"
-  value       = aws_db_instance.main.endpoint
-}
-
-output "db_connection_string" {
-  value     = "postgres://app@${aws_db_instance.main.endpoint}/app"
-  sensitive = true
+  value       = aws_s3_bucket.logs.bucket
 }
 ```
 
 A cosa servono:
 
-- **a te**: dopo l'`apply` vedi subito l'IP, l'endpoint, l'ARN che ti servono, senza cercarli in console;
-- **agli script**: `terraform output -raw bucket_name` restituisce il valore pulito da usare in bash o in una pipeline (lo useremo nel laboratorio della dispensa 1);
-- **ad altri progetti o moduli**: quando il progetto diventa un modulo, gli output sono il modo in cui passa valori al chiamante.
+- **a te**: dopo l'`apply` vedi subito il nome, l'indirizzo, l'ARN che ti servono, senza cercarli in console;
+- **agli script**: `terraform output -raw bucket_name` restituisce il valore pulito, da usare in un comando (lo useremo nella dispensa 1);
+- **ad altri moduli**: quando il progetto diventa un modulo, gli output passano valori a chi lo usa.
 
-Gli output sensibili vengono nascosti a video, ma come le variabili **sono salvati in chiaro nello state**.
-
-**Quando cambia:** quando serve esporre un nuovo valore.
+Anche un output può avere `sensitive = true`: viene nascosto a video, ma come le variabili **resta in chiaro nello state**.
 
 ---
 
@@ -681,29 +497,6 @@ Dopo `terraform init` compaiono:
 
 ---
 
-### E con più ambienti?
-
-Lo stesso codice deve girare in `dev`, `test` e `prod`. L'approccio più semplice e leggibile: **stesso codice, un tfvars e uno state per ambiente**.
-
-```
-infra/
-├── *.tf
-└── envs/
-    ├── dev.tfvars
-    ├── dev.backend.hcl     # key = "corso/dev/terraform.tfstate"
-    ├── prod.tfvars
-    └── prod.backend.hcl    # key = "corso/prod/terraform.tfstate"
-```
-
-```bash
-terraform init -reconfigure -backend-config=envs/prod.backend.hcl
-terraform plan -var-file=envs/prod.tfvars
-```
-
-La regola che non si discute: **ogni ambiente ha il suo state separato**. Un `destroy` lanciato per sbaglio in dev non deve poter toccare prod.
-
----
-
 ### Riepilogo della sezione
 
 | File | Contiene | Domanda a cui risponde | Cambia |
@@ -714,7 +507,6 @@ La regola che non si discute: **ogni ambiente ha il suo state separato**. Un `de
 | `terraform.tfvars` | Valori degli input | Con che valori gira questo ambiente? | Per ambiente |
 | `main.tf` (e `*.tf`) | Risorse, data, locals | Cosa costruisco? | Continuamente |
 | `outputs.tf` | Valori esposti | Cosa mi serve sapere alla fine? | A volte |
-
 
 ---
 
@@ -736,6 +528,23 @@ Cosa aspettarsi a video:
 - `init` scarica i provider (la prima volta impiega qualche secondo) e finisce con **"Terraform has been successfully initialized!"**;
 - `apply` e `destroy` mostrano prima il piano e poi chiedono **"Enter a value:"**: scrivi `yes` e premi Invio. Qualunque altra risposta annulla senza fare niente;
 - alla fine `apply` scrive **"Apply complete! Resources: N added, …"** e stampa gli output.
+
+### Provare senza paura: terraform console
+
+Dopo `terraform init` puoi aprire `terraform console`: un prompt dove scrivi un'espressione (sezione 2) e vedi il risultato. Non crea e non modifica niente. È il modo più rapido per capire un pezzo di codice che non ti torna.
+
+Le funzioni come `lower(...)` funzionano sempre. `var.qualcosa` funziona solo se la variabile è dichiarata nei file della cartella. Si esce con `exit`.
+
+```
+$ terraform console
+> lower("Corso-AWS")
+"corso-aws"
+> var.project
+"corso-aws"
+> "${var.project}-demo"
+"corso-aws-demo"
+> exit
+```
 
 ### Cosa succede davvero con plan e apply
 
@@ -767,13 +576,6 @@ Il `plan` è il momento più importante: **si legge sempre prima di applicare**.
 
 In fondo c'è il riepilogo, per esempio `Plan: 2 to add, 0 to change, 0 to destroy.` Se un `-/+` compare dove non te lo aspetti, ti fermi e capisci perché.
 
-**Buona pratica:** in ambienti seri si salva il plan e si applica esattamente quello, così tra la revisione e l'esecuzione non cambia niente:
-
-```bash
-terraform plan -out=piano.tfplan
-terraform apply piano.tfplan
-```
-
 ---
 
 ## 5. Lo state: il punto più delicato
@@ -785,17 +587,17 @@ Cose da sapere:
 - **Lo state contiene segreti in chiaro** (password di database, chiavi generate). Non va **mai** messo in Git.
 - **Lo state va tenuto remoto**, non sul portatile di qualcuno: se si perde, Terraform "dimentica" l'infrastruttura.
 - **Serve un lock**, cioè un cartello "occupato": mentre qualcuno lancia `apply`, Terraform blocca lo state e chi arriva dopo deve aspettare. Senza, due `apply` contemporanei possono corrompere lo state.
-- **Non si modifica a mano.** Per spostare o rimuovere risorse dallo state esistono comandi appositi (`terraform state mv`, `terraform state rm`, blocchi `moved` e `import`).
+- **Non si modifica a mano.** Per spostare o togliere risorse dallo state esistono comandi appositi (`terraform state ...`).
 
 ### Locale o remoto
 
 Se non c'è nessun `backend.tf`, lo state è **locale**: un file `terraform.tfstate` nella cartella del progetto. Per imparare va bene, e l'esercizio parte così. Per lavorare seriamente lo state va in un bucket S3 (**remoto**) con il `backend.tf` visto nella sezione 3:
 
 - `encrypt = true`: il file dello state viene salvato cifrato;
-- `use_lockfile = true`: il lock è un piccolo file creato accanto allo state nel bucket (serve Terraform 1.10 o successivo). In passato si usava una tabella DynamoDB: la troverai in molti esempi online, ma oggi non serve più;
+- `use_lockfile = true`: il lock è un piccolo file creato accanto allo state nel bucket. Molti esempi online usano ancora una tabella DynamoDB: oggi non serve più;
 - `key`: il percorso del file dello state dentro il bucket.
 
-Il bucket dello state è il classico problema dell'uovo e della gallina: non può essere creato dallo stesso codice che lo usa come backend, perché quel codice, per partire, ha già bisogno del bucket. Si crea quindi **una volta sola, a parte**, con la CLI; lo facciamo nel passo 7 dell'esercizio. Poi resta lì per tutto il corso.
+Il bucket dello state è il classico problema dell'uovo e della gallina. Il codice, per partire, ha già bisogno del bucket: quindi non può essere lui a crearlo. Si crea **una volta sola, a parte**, con la CLI (passo 7 dell'esercizio) e resta lì per tutto il corso.
 
 ### .gitignore
 
@@ -807,9 +609,7 @@ Il bucket dello state è il classico problema dell'uovo e della gallina: non pu�
 crash.log
 ```
 
-Il file `.gitignore` va nella stessa cartella dei `.tf` ed elenca i file che Git non deve salvare: qui la cartella dei provider scaricati, lo state e i piani. Se non usi Git puoi ignorarlo.
-
-Il file `.terraform.lock.hcl` invece **va committato**: fissa le versioni esatte dei provider, così tutti usano le stesse.
+Il file `.gitignore` va nella stessa cartella dei `.tf` ed elenca i file che Git non deve salvare: qui la cartella dei provider scaricati, lo state e i piani. Se non usi Git puoi ignorarlo. Il `.terraform.lock.hcl`, invece, in Git ci va (sezione 3).
 
 ### Il drift
 
@@ -846,7 +646,7 @@ Il comando fa alcune domande:
 | `SSO region` | `eu-south-1` |
 | `SSO registration scopes` | Invio (lascia il valore proposto) |
 
-Si apre il browser: accedi con l'utente del punto 2 e autorizza. Tornato al terminale, scegli l'account e il ruolo `AdministratorAccess`, poi:
+Si apre il browser: accedi con l'utente del punto 2 e autorizza. Tornato al terminale, scegli l'account e il permission set `AdministratorAccess`, poi:
 
 | Domanda | Cosa rispondere |
 |---|---|
@@ -996,18 +796,13 @@ output "bucket_arn" {
 
 **`random_id.suffix`**: un "tira i dadi" per rendere unico il nome del bucket.
 
-*Il problema.* Il nome di un bucket S3 deve essere unico **in tutto il mondo**, tra tutti i clienti AWS, come un indirizzo email. Se tu e un altro studente chiamate entrambi il bucket `corso-aws-demo`, il secondo che lancia `apply` riceve un errore: "nome già preso".
+*Il problema.* Il nome di un bucket S3 deve essere unico **in tutto il mondo**, come un indirizzo email. Se tu e un altro studente chiamate entrambi il bucket `corso-aws-demo`, il secondo riceve un errore: "nome già preso".
 
-*La soluzione.* Si aggiunge in fondo al nome un pezzo casuale: `corso-aws-demo-a1b2c3d4`. La probabilità che qualcun altro abbia esattamente lo stesso suffisso è praticamente nulla.
+*La soluzione.* In fondo al nome si aggiunge un pezzo casuale: `corso-aws-demo-a1b2c3d4`.
 
-*Cosa fa la risorsa.* `random_id` è una risorsa "finta": non crea niente su AWS, esiste solo dentro Terraform (viene dal provider `random`, dichiarato in `providers.tf`). Quando la crei, Terraform tira a sorte un numero:
+*Cosa fa la risorsa.* `random_id` è una risorsa "finta": non crea niente su AWS, esiste solo dentro Terraform (viene dal provider `random`). Tira a sorte un numero. Con `byte_length = 4`, l'attributo `.hex` lo restituisce come **8 caratteri** fatti di cifre `0-9` e lettere `a-f`, per esempio `a1b2c3d4`.
 
-- `byte_length = 4` significa "un numero grande 4 byte". Non serve capire i byte: basta sapere che, scritto in esadecimale (un modo di scrivere i numeri con le cifre `0-9` più le lettere `a-f`), diventa **8 caratteri**;
-- l'attributo `.hex` restituisce proprio quegli 8 caratteri, per esempio `a1b2c3d4`.
-
-*Perché non cambia ogni volta.* Il numero viene estratto **una volta sola**, al primo `apply`, e salvato nello state. Ai `plan` e `apply` successivi Terraform lo rilegge dallo state e usa lo stesso valore. Se cambiasse a ogni esecuzione cambierebbe anche il nome del bucket, e Terraform distruggerebbe e ricreerebbe il bucket ogni volta. Il numero cambia solo se distruggi la risorsa (`terraform destroy`) e la ricrei.
-
-In sequenza:
+*Perché non cambia ogni volta.* Il numero viene estratto **una volta sola**, al primo `apply`, e salvato nello state. Poi Terraform lo rilegge da lì. Se cambiasse a ogni esecuzione, cambierebbe anche il nome, e il bucket verrebbe distrutto e ricreato ogni volta.
 
 | Momento | Cosa succede a `random_id.suffix` | Nome del bucket |
 |---|---|---|
@@ -1015,9 +810,9 @@ In sequenza:
 | `apply` successivi | Rilegge `a1b2c3d4` dallo state | invariato |
 | `destroy` e nuovo `apply` | Estrae un numero nuovo, per esempio `9f8e7d6c` | `corso-aws-demo-9f8e7d6c` (bucket nuovo) |
 
-**`aws_s3_bucket.demo`** crea il bucket. L'argomento `bucket` è il nome, costruito per interpolazione: `var.project` (dal tfvars: `corso-aws`) + `-demo-` + il suffisso casuale. Il risultato sarà qualcosa come `corso-aws-demo-a1b2c3d4`. Siccome usa `random_id.suffix.hex`, Terraform sa che deve prima generare il numero e poi creare il bucket. `force_destroy = true` dice: "al `destroy`, cancella anche i file che ci sono dentro". Senza, AWS rifiuta di cancellare un bucket non vuoto. In un laboratorio è comodo; su un bucket con dati veri è pericoloso.
+**`aws_s3_bucket.demo`** crea il bucket. Il nome è costruito per interpolazione: `var.project` (`corso-aws`) + `-demo-` + il suffisso casuale. Siccome usa `random_id.suffix.hex`, Terraform genera prima il numero e poi crea il bucket. `force_destroy = true` dice: "al `destroy`, cancella anche i file che ci sono dentro". Senza, AWS rifiuta di cancellare un bucket non vuoto. In laboratorio è comodo; su dati veri è pericoloso.
 
-**`aws_s3_bucket_versioning.demo`** attiva il versioning sul bucket: ogni volta che un file viene sovrascritto o cancellato, S3 conserva la versione precedente. Nel provider AWS molte impostazioni del bucket (versioning, cifratura, policy, blocco dell'accesso pubblico) sono **risorse separate** che "puntano" al bucket tramite l'argomento `bucket`. Qui `aws_s3_bucket.demo.id` è l'identificativo del bucket appena creato, che per S3 coincide con il nome. `versioning_configuration` è un blocco annidato (niente `=`) con dentro l'unico argomento `status`.
+**`aws_s3_bucket_versioning.demo`** attiva il **versioning**: quando un file viene sovrascritto o cancellato, S3 conserva la versione precedente. Nel provider AWS molte impostazioni del bucket (versioning, cifratura, policy) sono **risorse separate**, che puntano al bucket con l'argomento `bucket`. Qui `aws_s3_bucket.demo.id` è l'identificativo del bucket, che per S3 coincide con il nome. `versioning_configuration` è un blocco annidato (niente `=`).
 
 **Gli output** mostrano alla fine dell'`apply` il nome e l'ARN del bucket, due attributi che AWS conosce solo dopo averlo creato.
 
@@ -1030,13 +825,13 @@ flowchart LR
     B -->|".bucket / .arn"| O["output<br/>bucket_name, bucket_arn"]
 ```
 
-E i tag `Project` e `ManagedBy`, che non compaiono in nessuna risorsa? Arrivano dai `default_tags` del blocco `provider "aws"` (sezione 3): il provider li aggiunge da solo a ogni risorsa AWS che li supporta.
+E i tag `Project` e `ManagedBy`, che non compaiono in nessuna risorsa? Arrivano dai `default_tags` del provider (sezione 3).
 
 ### Passi
 
 Prima di cominciare: `aws sso login --profile corso` ed `export AWS_PROFILE=corso` (sezione 6). Poi, nel terminale, entra nella cartella con `cd infra`.
 
-1. **`terraform init`**, poi **`terraform plan`**. Quante risorse crea? Perché tre e non due? (Atteso: `Plan: 3 to add`; la terza è `random_id`.)
+1. **`terraform init`**. Poi apri **`terraform console`** e scrivi `var.project`: che valore vedi? (Atteso: `"corso-aws"`, letto dal tfvars.) Esci con `exit` e lancia **`terraform plan`**. Quante risorse crea? Perché tre e non due? (Atteso: `Plan: 3 to add`; la terza è `random_id`.)
 2. **`terraform apply`** e conferma con `yes`. Poi controlla in console: cerca **S3**, apri il bucket `corso-aws-demo-…`, scheda **Properties**, sezione **Tags**. Ci sono `Project` e `ManagedBy`?
 3. **Modifica sul posto.** In `main.tf`, dentro il blocco `resource "aws_s3_bucket" "demo"`, sotto la riga `bucket = ...`, aggiungi l'argomento:
 
@@ -1060,7 +855,7 @@ Prima di cominciare: `aws sso login --profile corso` ed `export AWS_PROFILE=cors
      --versioning-configuration Status=Enabled
    ```
 
-   `$( )` esegue il comando tra parentesi e ne salva il risultato nella variabile `ACCOUNT_ID`; `\` a fine riga significa "il comando continua sulla riga sotto". Il numero dell'account nel nome rende il bucket unico al mondo. I bucket nuovi nascono già cifrati e con l'accesso pubblico bloccato; il versioning conserva le versioni precedenti dello state, utile se un giorno si rovina.
+   `$( )` esegue il comando tra parentesi e ne salva il risultato nella variabile `ACCOUNT_ID`. `\` a fine riga significa "il comando continua sotto". Il numero dell'account rende il nome unico al mondo. Il versioning conserva le versioni precedenti dello state, se un giorno si rovina.
 
    Poi crea `backend.tf` con il blocco della sezione 3, scrivendo in `bucket` il nome vero (es. `corso-aws-tfstate-123456789012`), e lancia:
 
@@ -1071,7 +866,14 @@ Prima di cominciare: `aws sso login --profile corso` ed `export AWS_PROFILE=cors
    Terraform chiede se copiare lo state esistente nel nuovo backend: rispondi `yes`. Da ora lo state vive su S3: controlla in console che nel bucket ci sia `corso/terraform.tfstate`. Il file locale `terraform.tfstate` rimasto nella cartella non serve più e si può cancellare.
 8. **`terraform destroy`** e conferma con `yes`. Il bucket `demo` sparisce; il bucket dello state no, perché non è gestito da Terraform: resta per le prossime dispense.
 
-**Domanda di verifica:** cosa succederebbe al punto 8 se nel bucket `demo` ci fossero dei file e **non** avessimo scritto `force_destroy = true`? (Il destroy fallisce: AWS non cancella un bucket non vuoto. `force_destroy` scavalca questa protezione, per questo si usa solo nei laboratori.)
+### Domande di verifica
+
+1. Che differenza c'è tra `plan` e `apply`? (`plan` mostra cosa farebbe e non tocca niente; `apply` esegue le modifiche su AWS e aggiorna lo state.)
+2. A cosa serve lo state, e perché non va in Git? (Collega ogni risorsa del codice a quella reale su AWS. Contiene segreti in chiaro.)
+3. Cos'è il drift, e come lo hai visto al passo 5? (Una modifica fatta a mano fuori da Terraform: il `plan` la scopre e propone di annullarla.)
+4. `var.project` e `local.prefix`: chi decide il valore di ciascuno? (La variabile la decidi tu nel tfvars; il local lo calcola Terraform con una formula.)
+5. Perché lo state sta su S3 con `use_lockfile = true`, e non sul portatile? (Su S3 non si perde ed è condiviso; il lock impedisce due `apply` contemporanei.)
+6. Cosa succederebbe al passo 8 se nel bucket `demo` ci fossero dei file e **non** avessimo scritto `force_destroy = true`? (Il destroy fallisce: AWS non cancella un bucket non vuoto. `force_destroy` scavalca questa protezione, per questo si usa solo nei laboratori.)
 
 ---
 
@@ -1079,6 +881,14 @@ Prima di cominciare: `aws sso login --profile corso` ed `export AWS_PROFILE=cors
 
 - Terraform descrive lo **stato desiderato**, non i passi.
 - Le dipendenze nascono dai **riferimenti** tra risorse.
+- Le **variabili** le scegli tu nel tfvars; i **locals** li calcola Terraform.
 - Il **plan si legge sempre**, e un `-/+` inatteso è un campanello d'allarme.
 - Lo **state** è remoto, cifrato, con lock, fuori da Git e mai modificato a mano.
 - Le credenziali sono **temporanee** e **mai nel codice**.
+
+> **Per quando lavorerai in un team.** Cose che negli esercizi del corso non servono, ma incontrerai presto:
+>
+> - **Più ambienti:** stesso codice, un tfvars e **uno state separato per ambiente** (es. `envs/prod.tfvars` con `-var-file`, e il backend scelto con `terraform init -backend-config=...`). Un `destroy` sbagliato in dev non deve poter toccare prod.
+> - **Da dove arrivano i valori:** oltre al tfvars ci sono i file `*.auto.tfvars` e le variabili d'ambiente `TF_VAR_nome`. Se "ho cambiato il tfvars ma non succede niente", qualcosa lo sta sovrascrivendo.
+> - **Provider con `alias`:** una seconda configurazione dello stesso provider, per esempio per creare alcune risorse in un'altra regione.
+> - **Plan salvato:** `terraform plan -out=piano.tfplan` e poi `terraform apply piano.tfplan` applicano esattamente il piano revisionato.

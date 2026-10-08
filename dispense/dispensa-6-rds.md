@@ -59,7 +59,7 @@ PostgreSQL è un programma: lo potresti installare tu su un server EC2 (dispensa
 
 | | PostgreSQL su EC2 | RDS PostgreSQL |
 |---|---|---|
-| Installazione e aggiornamenti | tu | AWS, nella **finestra di manutenzione** che scegli |
+| Installazione e aggiornamenti | tu | AWS, nella **finestra di manutenzione** (un orario settimanale che scegli tu) |
 | Backup | li organizzi tu | **automatici**, ogni giorno, più i log continui (sezione 6) |
 | Copia di riserva in un'altra AZ | la costruisci tu | un'opzione: `multi_az = true` (sezione 4) |
 | Accesso al sistema operativo | sì | **no** |
@@ -121,8 +121,8 @@ Una **copia in sola lettura**, aggiornata **in modo asincrono**: il primario dic
 | | Multi-AZ istanza | Multi-AZ DB cluster | Read replica |
 |---|---|---|---|
 | A cosa serve | sopravvivere a un guasto | guasto + letture in più | letture in più, altra regione |
-| Copie | 1 standby | 2 standby | da 1 a 15 |
-| Replica | sincrona | sincrona (semi-sincrona) | asincrona |
+| Copie | 1 standby | 2 standby | una o più |
+| Replica | sincrona | sincrona | asincrona |
 | La copia si può leggere? | no | sì | sì |
 | Se il primario cade | **passaggio automatico** | **passaggio automatico**, più rapido | promozione **manuale** |
 | Nel corso | **sì** | no (servono 3 AZ e macchine più grandi) | no |
@@ -134,7 +134,6 @@ flowchart TD
     Q1 -->|"sì"| Q2{"Servono anche letture in più,<br/>o un passaggio più rapido?"}
     Q2 -->|"no"| MAZ["Multi-AZ istanza<br/>multi_az = true<br/>(il nostro caso)"]
     Q2 -->|"sì"| CL["Multi-AZ DB cluster<br/>(3 AZ, macchine più grandi)"]
-    Q1 -.->|"in più, se servono letture<br/>in un'altra regione"| RR["Read replica"]
 ```
 
 Per gli ambienti di prova si può spegnere il Multi-AZ e risparmiare metà: per questo lo mettiamo in una **variabile**, `db_multi_az`.
@@ -275,14 +274,12 @@ Con `manage_master_user_password = true` diciamo a RDS: **genera tu la password*
 
 Chi deve leggere la password?
 
-- **Il server dell'applicazione.** Gli diamo il permesso `secretsmanager:GetSecretValue` **su quel segreto e basta**, aggiungendo una policy al suo role (dispensa 4). È il file `secrets.tf`. Come l'applicazione la usa davvero lo vediamo nella dispensa 8.
+- **Il server dell'applicazione.** Gli diamo il permesso `secretsmanager:GetSecretValue` **su quel segreto e basta**, aggiungendo una policy al suo role (dispensa 4). È il file `secrets.tf`. Come l'applicazione la usa davvero lo vediamo nella dispensa 9.
 - **Gli amministratori**, dal loro computer, con il login AWS.
 
 Siccome la password **cambia ogni 7 giorni**, nessuno deve copiarla in un file: va letta dal segreto **ogni volta** che serve.
 
-> **Attenzione alla rotazione, e un'alternativa.** La rotazione automatica funziona solo se qualcuno **rilegge il segreto** dopo che è cambiato. Molte applicazioni invece leggono la password **una volta, all'avvio**, e la tengono in memoria o in un file di configurazione: dopo 7 giorni RDS la cambia, le connessioni già aperte continuano a funzionare, ma alla prima riconnessione l'applicazione resta fuori.
->
-> Le strade sono due. **Uno:** sul server, un piccolo programma rilegge il segreto ogni pochi minuti e, se è cambiato, riavvia l'applicazione con la password nuova. È la soluzione che usiamo nella dispensa 8. **Due:** niente rotazione automatica. La password la genera Terraform con `random_password`, la mette in un segreto di Secrets Manager e la imposta sul database nello stesso `apply`; per cambiarla la si rigenera e si riavvia l'applicazione. Il prezzo: la password finisce nello **state**, che va quindi trattato come un segreto (bucket privato, cifrato, letto da pochissimi). La scelgono i progetti che preferiscono una rotazione **decisa da loro** a una automatica.
+> **Attenzione alla rotazione, e un'alternativa.** Molte applicazioni leggono la password solo all'avvio: dopo la rotazione, alla prima riconnessione restano fuori. Nella dispensa 9 vediamo come rileggerla in automatico. Un'alternativa è generare la password con `random_password` di Terraform e cambiarla a mano quando decidi tu, con il prezzo che finisce nello state.
 
 ---
 
@@ -520,7 +517,9 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
 1. **`terraform plan`**. Le risorse nuove sono: il subnet group, il parameter group, il suffisso casuale, il database, la policy con il suo attachment. C'è una password da qualche parte nel plan? (Atteso: no.)
 2. **`terraform apply`**, poi aspetta: 15-20 minuti. In console: **RDS → Databases → corso-aws-db**. Nella scheda **Configuration** controlla *Multi-AZ: Yes*; nella scheda **Connectivity & security** trovi l'endpoint e la porta 5432.
 3. **La password.** In console: **Secrets Manager → Secrets**. C'è un segreto il cui nome inizia con `rds!db-`: è quello creato da RDS. Apri **Rotation**: è attiva ogni 7 giorni. Poi apri lo state: `terraform state show aws_db_instance.main`. La password c'è? (Atteso: no, solo l'ARN del segreto.)
-4. **Dal server dell'applicazione.** Leggi i due valori dal tuo computer:
+4. **Dal server dell'applicazione.** Tre tempi: prepari, ti colleghi, provi quello che deve fallire.
+
+   **4a. Prepara.** Leggi i due valori dal tuo computer:
 
    ```bash
    terraform output -raw db_address
@@ -534,7 +533,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
    dnf install -y postgresql18     # se non lo trova: dnf search postgresql
    ```
 
-   Poi, sostituendo i due valori letti prima:
+   Poi, sostituendo i due valori letti prima, prepara indirizzo, certificato, password e la variabile `$DB` con tutti i dati della connessione:
 
    ```bash
    export DB_HOST="corso-aws-db.….rds.amazonaws.com"
@@ -549,13 +548,20 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
      | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
 
    export DB="host=$DB_HOST dbname=app user=dbadmin sslmode=verify-full sslrootcert=/root/global-bundle.pem"
+   ```
+
+   > **Nota.** Se chiudi la sessione SSM, le variabili `DB_HOST`, `PGPASSWORD` e `DB` si perdono: ripeti gli `export` prima dei passi 7 e 8.
+
+   **4b. Collegati e verifica il TLS.**
+
+   ```bash
    psql "$DB" -c "select version();"
    psql "$DB" -c "select ssl, version from pg_stat_ssl where pid = pg_backend_pid();"
    ```
 
    (Atteso: `PostgreSQL 18.…`; la seconda query risponde `t` e una versione di TLS, per esempio `TLSv1.3`: questa connessione è cifrata. Il server ha letto la password grazie a `secrets.tf` ed è passato dal SG `db` grazie alla regola `db_from_app`.) Domanda: se togliessi `secrets.tf`, quale comando fallirebbe, e con quale errore?
 
-   Ora prova le due cose che **non** devono funzionare:
+   **4c. Le due prove che devono fallire.**
 
    ```bash
    # senza cifratura
@@ -578,7 +584,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
 
    e collegati con `psql "host=$(terraform output -raw db_address) dbname=app user=dbadmin sslmode=verify-full sslrootcert=global-bundle.pem"`, incollando la password quando la chiede: il comando di prima stampa un piccolo JSON con `username` e `password`, e ti serve il valore di `password`, senza virgolette. (Atteso: funziona. Il nome dell'endpoint, anche da casa, porta all'indirizzo privato `10.20.20.x`, che raggiungi attraverso il router.) Non lasciare la password in giro: chiudi il terminale quando hai finito.
 6. **Da casa, come sviluppatore.** Sposta il tuo nome in `tailscale_devs`, lancia `apply` e riprova il passo 5. (Atteso: la connessione **resta in attesa e scade**. Chi ti blocca? Tailscale: la policy del tailnet non dà a `group:dev` la porta 5432. Il SG `db` non c'entra: ti avrebbe fatto passare, perché arrivi dal router.) Rimettiti in `tailscale_admins` e fai `apply`.
-7. **Rompi la NACL (dispensa 3).** In `security.tf` commenta il blocco `db_out_ephemeral`, e questa volta **applica**. Dal server, ripeti `psql "$DB" -c "select 1;"`. (Atteso: resta in attesa. La richiesta arriva al database sulla 5432, ma la risposta non può uscire dalla subnet database verso le porte effimere.) Togli i `#`, applica di nuovo, riprova: funziona.
+7. **Rompi la NACL (dispensa 3).** In `security.tf` disattiva il blocco `db_out_ephemeral`: racchiudi il blocco tra `/*` e `*/` (tutto quello che sta in mezzo diventa un commento), e questa volta **applica**. Dal server, ripeti `psql "$DB" -c "select 1;"`. (Atteso: resta in attesa. La richiesta arriva al database sulla 5432, ma la risposta non può uscire dalla subnet database verso le porte effimere.) Dopo, togli i due segni `/*` e `*/`, applica di nuovo, riprova: funziona.
 8. **Il failover.** Nel server, lancia un ciclo che si collega ogni 2 secondi e stampa l'indirizzo del database che ha risposto:
 
    ```bash

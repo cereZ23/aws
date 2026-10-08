@@ -85,7 +85,7 @@ flowchart LR
     end
 ```
 
-Il router **cambia il mittente** dei pacchetti con il proprio indirizzo prima di consegnarli. Per il server e per il database, quindi, una connessione dalla VPN arriva **dal router**: un indirizzo della subnet privata, con il **Security Group `vpn`** della dispensa 3. Per questo le regole che abbiamo già scritto funzionano senza modifiche:
+Il router **cambia il mittente** dei pacchetti con il proprio indirizzo prima di consegnarli. Lo fa Tailscale da solo: è il comportamento predefinito di un subnet router, non serve scrivere niente. Per il server e per il database, quindi, una connessione dalla VPN arriva **dal router**: un indirizzo della subnet privata, con il **Security Group `vpn`** della dispensa 3. Per questo le regole che abbiamo già scritto funzionano senza modifiche:
 
 - il SG `app` accetta la 8080 dal SG `vpn`;
 - il SG `db` accetta la 5432 dal SG `vpn`;
@@ -93,9 +93,7 @@ Il router **cambia il mittente** dei pacchetti con il proprio indirizzo prima di
 
 Il router deve annunciare le subnet che vogliamo raggiungere (*advertise routes*): nel nostro caso le subnet **private** e le subnet **database**.
 
-> **Alternativa: Tailscale direttamente sul server.** Se c'è un solo server da raggiungere, si può installare Tailscale **sul server stesso**, senza router. Con il comando `tailscale serve` il server pubblica la sua applicazione nel tailnet in HTTPS, con un nome come `https://app.<nome-del-tailnet>.ts.net` e un certificato valido. Il suo Security Group può restare **senza nessuna regola in ingresso**, perché la connessione verso Tailscale la apre il server.
->
-> Vantaggi: un server in meno e nessun SG `vpn`. Limiti: si raggiunge **solo quel server**, non il database (per usare psql da casa serve comunque un subnet router, o un tunnel con SSM). E quando il server viene ricreato, quello nuovo deve rientrare nel tailnet con **lo stesso nome**: prima bisogna togliere il vecchio dispositivo, altrimenti Tailscale chiama il nuovo `app-1`. Si automatizza con un *client OAuth* di Tailscale. Nel corso usiamo il router perché mostra come si entra in un'intera rete, database compreso.
+> **Alternativa: Tailscale direttamente sul server.** Con un solo server da raggiungere si può installare Tailscale sul server stesso (`tailscale serve`), senza router e senza SG `vpn`; però così non si raggiunge il database. Noi usiamo il router.
 
 ---
 
@@ -406,11 +404,15 @@ Una conseguenza da ricordare: la chiave nello state è già **usata** (o scaduta
 terraform apply -replace=tailscale_tailnet_key.router
 ```
 
-`-replace` vuol dire "ricrea questa risorsa anche se non è cambiata". La chiave nuova cambia il `user_data`, e nello stesso `apply` il router viene ricreato con la chiave buona. Lo useremo nella dispensa 8.
+`-replace` vuol dire "ricrea questa risorsa anche se non è cambiata". La chiave nuova cambia il `user_data`, e nello stesso `apply` il router viene ricreato con la chiave buona. Lo useremo nella dispensa 9.
 
 **3. Le uscite.** Tre regole in uscita aggiunte al SG `vpn` della dispensa 3: TCP 443, UDP 41641 e UDP 3478 verso internet (sezione 7). Le regole della dispensa 3 restano: il SG `vpn` continua a raggiungere tutta la nostra rete.
 
-**4. Il router.** Prima il suo **role**, con lo stesso schema della dispensa 4: la trust policy `ec2_trust` (già scritta lì, si riusa), la sola policy `AmazonSSMManagedInstanceCore` e l'instance profile. Perché non riusare il role del server dell'applicazione? Perché quel role, nelle prossime dispense, riceverà altri permessi (la password del database, gli artefatti…), e al router serve **solo** SSM: ogni server ha il suo role, con i permessi che servono a lui e basta (privilegio minimo, dispensa 1). Poi il server: è lo stesso schema della dispensa 4, con il SG `vpn`, il tipo `t4g.nano` e l'instance profile `router`. Il `user_data` fa tre cose:
+**4. Il router.**
+
+*Il role del router (solo SSM).* Stesso schema della dispensa 4: la trust policy `ec2_trust` (già scritta lì, si riusa), la sola policy `AmazonSSMManagedInstanceCore` e l'instance profile. Perché non riusare il role del server dell'applicazione? Perché quel role, più avanti, riceverà altri permessi (la password del database, gli artefatti…). Al router serve **solo** SSM: ogni server ha il suo role, con i permessi che servono a lui e basta (privilegio minimo, dispensa 1).
+
+*Il server.* Stesso schema della dispensa 4, con il SG `vpn`, il tipo `t4g.nano` e l'instance profile `router`. Il `user_data` fa tre cose:
 
 1. attiva l'**inoltro dei pacchetti** (`ip_forward`), e lo rende permanente scrivendolo in un file di configurazione;
 2. **installa Tailscale** con lo script ufficiale;
@@ -425,7 +427,7 @@ terraform apply -replace=tailscale_tailnet_key.router
 
 La funzione **`join(",", lista)`** unisce gli elementi di una lista in un testo, separandoli con una virgola: `"10.20.10.0/24,10.20.11.0/24,10.20.20.0/24,10.20.21.0/24"`.
 
-Attenzione a una differenza dentro il `user_data`: `${…}` è **Terraform** che inserisce un valore prima di passare lo script al server; le righe che iniziano con `#` sono commenti dello script.
+Dentro il `user_data`, `${…}` lo sostituisce Terraform prima di consegnare lo script al server. Le righe `# 1.`, `# 2.`… sono commenti per chi legge; `#!/bin/bash`, la prima riga, dice invece quale programma esegue lo script.
 
 ---
 
@@ -486,7 +488,7 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 8. **Il gruppo.** In `terraform.tfvars` sposta il tuo nome da `tailscale_admins` a `tailscale_devs`, lancia `apply` e ripeti il passo 6. (Atteso: funziona ancora, gli sviluppatori raggiungono la 8080.) La prova sul database la faremo nella dispensa 6. Poi rimettiti tra gli amministratori.
 
 9. **Dentro il router.** Entra nel router con SSM, come nella dispensa 4, e lancia `tailscale status`: vedi l'elenco dei dispositivi del tailnet, compreso il tuo computer.
-10. **Pulizia.** `terraform destroy`. Il router scompare anche dalla console di Tailscale, perché era *effimero*. Nella console di Tailscale puoi revocare la chiave API (**Settings → Keys**).
+10. **Pulizia.** `terraform destroy`. Il router scompare anche dalla console di Tailscale entro qualche minuto (non subito), perché era *effimero*. Nella console di Tailscale puoi revocare la chiave API (**Settings → Keys**).
 
 ### Domande di verifica
 

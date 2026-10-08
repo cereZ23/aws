@@ -4,7 +4,7 @@
 
 ## Obiettivo
 
-Il server c'è (dispensa 4), il database pure (dispensa 6). Ma oggi sul server gira una pagina finta, scritta nel `user_data`. Un'applicazione vera va **costruita** da qualche parte, **conservata** in un posto sicuro e **scaricata** dal server. Questa dispensa prepara i due "magazzini" da cui il server prenderà l'applicazione; la dispensa 8 li userà per il deploy.
+Il server c'è (dispensa 4), il database pure (dispensa 6). Ma oggi sul server gira una pagina finta, scritta nel `user_data`. Un'applicazione vera va **costruita** da qualche parte, **conservata** in un posto sicuro e **scaricata** dal server. Questa dispensa prepara i due "magazzini" da cui il server prenderà l'applicazione; le dispense 8 e 9 li useranno per il deploy.
 
 Alla fine di questa dispensa:
 
@@ -43,12 +43,12 @@ flowchart LR
     DEV["Codice dell'app<br/>(Git)"] -->|"1. costruisci<br/>una volta"| IMG["Immagine<br/>app:v1"]
     IMG -->|"2. conserva"| ECR[("ECR<br/>il magazzino<br/>delle immagini")]
     CFG["docker-compose.yml<br/>e altri file di deploy"] -->|"2. conserva"| S3[("S3<br/>il magazzino<br/>dei file")]
-    ECR -->|"3. scarica"| SRV["Server<br/>(dispensa 8)"]
+    ECR -->|"3. scarica"| SRV["Server<br/>(dispensa 9)"]
     S3 -->|"3. scarica"| SRV
     SM[("Secrets Manager<br/>dispensa 6")] -->|"3. legge"| SRV
 ```
 
-Oggi costruiamo i due magazzini, ECR e S3. Nella dispensa 8 il passo 1 lo farà da solo GitHub Actions, e il passo 3 lo farà il server all'avvio.
+Oggi costruiamo i due magazzini, ECR e S3. Nella dispensa 8 il passo 1 lo farà da solo GitHub Actions; nella dispensa 9 il passo 3 lo farà il server all'avvio.
 
 ---
 
@@ -76,7 +76,7 @@ Un'immagine si indica così: **indirizzo del registry / nome : tag**. Per esempi
 └──────────── il registry ECR del tuo account ──────┘ └─ nome ─┘ └tag┘
 ```
 
-Come si mettono insieme più container sullo stesso server (l'app, una cache…) lo vediamo nella dispensa 8, con **docker compose**.
+Come si mettono insieme più container sullo stesso server (l'app, una cache…) lo vediamo nella dispensa 9, con **docker compose**.
 
 ---
 
@@ -113,7 +113,7 @@ Le immagini in ECR sono sempre cifrate. Scegliamo la cifratura con **KMS** e la 
 
 ## 4. S3: il magazzino dei file di deploy
 
-Oltre all'immagine, il server ha bisogno di qualche **file**: soprattutto il `docker-compose.yml` che dice quali container avviare e come (dispensa 8). Questi file li teniamo in un **bucket S3** (dispensa 0) dedicato.
+Oltre all'immagine, il server ha bisogno di qualche **file**: soprattutto il `docker-compose.yml` che dice quali container avviare e come (dispensa 9). Questi file li teniamo in un **bucket S3** (dispensa 0) dedicato.
 
 Cosa va dove:
 
@@ -129,12 +129,7 @@ Un bucket con i file di deploy è un bersaglio: chi potesse **scriverci** decide
 
 Un bucket S3 può diventare pubblico in due modi: con una **bucket policy** che dà accesso a tutti (`"Principal": "*"`), o con le **ACL**, un vecchio sistema di permessi per singolo file. Il **Block Public Access** è un interruttore generale con quattro levette, che **vince su tutto**: se sono tutte e quattro accese, nessuna policy e nessuna ACL può rendere pubblico il bucket, nemmeno per errore.
 
-| Levetta | Cosa blocca |
-|---|---|
-| `block_public_acls` | rifiuta le **nuove** ACL pubbliche |
-| `ignore_public_acls` | ignora le ACL pubbliche **già esistenti** |
-| `block_public_policy` | rifiuta una bucket policy che renderebbe pubblico il bucket |
-| `restrict_public_buckets` | se una policy pubblica esiste già, solo AWS e il proprio account possono usarla |
+Non serve ricordarle una per una: **quattro levette, tutte accese = mai pubblico**. Le vediamo nella spiegazione del codice.
 
 In più spegniamo del tutto le ACL (*Object Ownership* = `BucketOwnerEnforced`): i permessi si decidono solo con le policy IAM e la bucket policy, in un posto solo. Sui bucket nuovi AWS fa già entrambe le cose da sola; le scriviamo lo stesso, per lo stesso motivo di `rds.force_ssl` nella dispensa 6: una protezione che dipende da un default invisibile può sparire.
 
@@ -438,6 +433,15 @@ output "artifacts_bucket" {
 | `aws_s3_bucket_server_side_encryption_configuration` | la cifratura di default: `AES256` è il nome tecnico di SSE-S3 |
 | `aws_s3_bucket_lifecycle_configuration` | la pulizia: le versioni non più correnti (`noncurrent`) si cancellano dopo 30 giorni. `filter {}` vuoto vuol dire "per tutti i file" |
 
+Le quattro levette del Block Public Access, una per una:
+
+| Levetta | Cosa blocca |
+|---|---|
+| `block_public_acls` | rifiuta le **nuove** ACL pubbliche |
+| `ignore_public_acls` | ignora le ACL pubbliche **già esistenti** |
+| `block_public_policy` | rifiuta una bucket policy che renderebbe pubblico il bucket |
+| `restrict_public_buckets` | se una policy pubblica esiste già, solo AWS e il proprio account possono usarla |
+
 **`data.aws_iam_policy_document.artifacts_tls_only`** è la bucket policy, scritta con lo stesso strumento delle policy della dispensa 1. È una resource-based policy, quindi ha i `principals`: `type = "*"` e `identifiers = ["*"]` vuol dire "chiunque". `effect = "Deny"`, `actions = ["s3:*"]` (tutte le operazioni di S3), su due `resources`: il bucket stesso (`.arn`) e tutti i file dentro (`.arn/*`). Il blocco `condition` si legge: "se la variabile `aws:SecureTransport` (la richiesta è cifrata?) vale `false`". In una frase: **chiunque, qualunque cosa, se non è HTTPS: no**.
 
 **`aws_s3_bucket_policy.artifacts`** attacca la policy al bucket. **`depends_on`** è un argomento che si può scrivere in qualunque risorsa: dice a Terraform "crea prima queste altre risorse", per i casi in cui l'ordine conta ma non c'è un riferimento da cui Terraform possa capirlo da solo (di solito l'ordine lo ricava dai riferimenti, dispensa 0). Qui evita che AWS veda la policy prima che le levette del Block Public Access siano a posto.
@@ -527,7 +531,7 @@ Obiettivo: creare i due magazzini, caricare un'immagine e un file, e verificare 
 
    (Atteso: la lettura funziona e stampa `versione 2`; elencare e scrivere danno *AccessDenied*; il login al registry funziona. È il privilegio minimo della sezione 6: il server legge, e basta.)
 10. **La scorciatoia.** In console: **VPC → Route tables**, apri una route table **privata**. Oltre alla rotta verso il NAT, ce n'è una con destinazione `pl-…` e target `vpce-…`: è il Gateway Endpoint. Apri la route table delle subnet database: c'è? (Atteso: no.)
-11. **Pulizia.** `terraform destroy`, oppure lascia tutto se prosegui subito con la dispensa 8, che usa repository e bucket. Grazie a `force_delete` e `force_destroy`, il `destroy` cancella anche le immagini e i file.
+11. **Pulizia.** `terraform destroy`, oppure lascia tutto se prosegui subito con le dispense 8 e 9, che usano repository e bucket. Grazie a `force_delete` e `force_destroy`, il `destroy` cancella anche le immagini e i file.
 
 ### Domande di verifica
 

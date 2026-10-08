@@ -6,7 +6,15 @@
 
 Alla fine di questa dispensa sai leggere e scrivere una policy IAM, sai perché una richiesta viene accettata o negata, conosci la differenza tra trust policy e permission policy e sai costruire in Terraform un role con privilegi minimi.
 
-IAM viene prima di reti e server perché **ogni singola chiamata ad AWS passa da IAM**: la console, la CLI, Terraform, un'istanza EC2 che legge da S3. Se IAM non è chiaro, tutto il resto sembra magia.
+IAM viene prima di reti e server perché **ogni singola chiamata ad AWS passa da IAM**: la console, la CLI, Terraform, un server EC2 che legge da S3. Se IAM non è chiaro, tutto il resto sembra magia.
+
+---
+
+## Prima di iniziare
+
+- Si lavora nella **stessa cartella** `infra/` della dispensa 0: nell'esercizio aggiungi il file `iam.tf` accanto a `main.tf`. Terraform legge tutti i `.tf` insieme, quindi `iam.tf` può usare il bucket `aws_s3_bucket.demo` definito in `main.tf`.
+- La dispensa 0 finiva con un `destroy`: il bucket non esiste più. Nessun problema: l'`apply` di questa dispensa ricrea bucket, file e role tutti insieme.
+- Rinnova il login: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
 
 ---
 
@@ -18,7 +26,7 @@ Ogni operazione su AWS, che sia un clic in console, un comando della CLI o un `a
 
 Il **principal** è chiunque faccia la richiesta: una persona, un'applicazione, un servizio AWS.
 
-Esempio: *il role dell'applicazione* vuole fare *s3:GetObject* sull'*oggetto releases/app.zip del bucket artefatti*, *dall'interno della rete privata dell'azienda su AWS* (il VPC, dispensa 2).
+Esempio: *il role dell'applicazione* vuole fare *s3:GetObject* sull'*oggetto releases/app.zip del bucket artefatti*, *solo se ha fatto login con MFA*.
 
 IAM guarda le policy applicabili e risponde **sì** o **no**. Tutto il resto di questa dispensa è il dettaglio di questa domanda.
 
@@ -79,16 +87,13 @@ Una policy è un documento **JSON**, un formato di testo per dati strutturati mo
       "Sid": "LetturaRelease",
       "Effect": "Allow",
       "Action": ["s3:GetObject"],
-      "Resource": "arn:aws:s3:::corso-artefatti/releases/*",
-      "Condition": {
-        "StringEquals": { "aws:SourceVpce": "vpce-0abc123" }
-      }
+      "Resource": "arn:aws:s3:::corso-artefatti/releases/*"
     }
   ]
 }
 ```
 
-Letta in italiano: "consenti di leggere i file che stanno sotto `releases/` nel bucket `corso-artefatti`, ma solo se la richiesta arriva da un certo punto di accesso privato alla rete (`vpce-0abc123`)". I singoli campi:
+Letta in italiano: "consenti di leggere i file che stanno sotto `releases/` nel bucket `corso-artefatti`". I singoli campi:
 
 | Campo | Significato |
 |---|---|
@@ -97,14 +102,33 @@ Letta in italiano: "consenti di leggere i file che stanno sotto `releases/` nel 
 | `Effect` | `Allow` o `Deny` |
 | `Action` | Le API interessate, nel formato `servizio:Azione` |
 | `Resource` | Su cosa, identificato dall'**ARN** |
-| `Condition` | Vincoli aggiuntivi (rete di provenienza, MFA, tag, regione…) |
+| `Condition` | Vincoli aggiuntivi, facoltativi (MFA, prefisso, tag, regione…) |
 | `Principal` | **Chi**: compare solo nelle policy attaccate alle risorse e nelle trust policy |
 
 Nelle azioni si può usare il jolly `*`, che significa "qualunque sequenza di caratteri": `ec2:Describe*` vuol dire "tutte le azioni EC2 il cui nome inizia con Describe", cioè tutte quelle di sola lettura.
 
 ### Le condition key
 
-Nel campo `Condition`, `aws:SourceVpce` è una **condition key**: una variabile che AWS riempie da solo con il contesto della richiesta. Qui contiene l'identificativo del *VPC endpoint* da cui arriva la richiesta, cioè una "porta privata" verso S3 che vedremo nella dispensa 7. Le chiavi che iniziano con `aws:` valgono per tutti i servizi (per esempio `aws:SourceIp`, l'indirizzo di provenienza, o `aws:MultiFactorAuthPresent`, "ha usato l'MFA?"); quelle con il prefisso di un servizio, come `s3:prefix`, valgono solo per quel servizio. `StringEquals` è il tipo di confronto: "uguale, carattere per carattere". Esiste anche `StringLike`, che ammette il jolly `*`.
+Il campo `Condition` aggiunge un "ma solo se…". Si scrive con una **condition key**: una variabile che AWS riempie da solo con il contesto della richiesta. Ecco l'esempio che useremo nell'esercizio:
+
+```json
+{
+  "Sid": "ElencoSoloRelease",
+  "Effect": "Allow",
+  "Action": "s3:ListBucket",
+  "Resource": "arn:aws:s3:::corso-artefatti",
+  "Condition": {
+    "StringLike": { "s3:prefix": "releases/*" }
+  }
+}
+```
+
+Letta in italiano: "consenti di elencare il contenuto del bucket, ma solo se chi chiede sta elencando qualcosa sotto `releases/`".
+
+- `s3:prefix` è la condition key: contiene il prefisso che la richiesta vuole elencare (i prefissi li vediamo tra poco).
+- `StringLike` è il tipo di confronto: "uguale, ammettendo il jolly `*`". Esiste anche `StringEquals`: "uguale, carattere per carattere".
+
+Le chiavi che iniziano con `aws:` valgono per tutti i servizi, per esempio `aws:MultiFactorAuthPresent` ("ha usato l'MFA?"). Quelle con il prefisso di un servizio, come `s3:prefix`, valgono solo per quel servizio. Nella dispensa 7 useremo `aws:SourceVpce`, per accettare richieste solo da una "porta privata" verso S3.
 
 ### Gli ARN
 
@@ -143,11 +167,11 @@ Da qui il classico errore su S3: **il bucket e i suoi oggetti sono risorse diver
 - **Customer managed**: scritte da noi, riutilizzabili su più identità.
 - **Inline**: scritte dentro una singola identità, nascono e muoiono con essa.
 
-**Resource-based policy**: attaccata a una risorsa (bucket policy su S3, key policy su KMS, il servizio delle chiavi di cifratura che vedremo nella dispensa 6, trust policy di un role). Dice *chi può fare cosa su questa risorsa*. Ha il campo `Principal`.
+**Resource-based policy**: attaccata a una risorsa. Esempi: la *bucket policy* di un bucket S3 e la *trust policy* di un role (sezione 6). Dice *chi* può fare *cosa* su quella risorsa, quindi ha il campo `Principal`.
 
-**Perché ci sono due posti?** Perché la risorsa può voler porre condizioni sue. Un bucket può dire "accetto richieste solo da questo VPC endpoint" indipendentemente da quanto siano larghi i permessi di chi chiede.
+**Perché ci sono due posti?** Perché la risorsa può voler porre regole sue. Un bucket può dire "nessuno cancella i miei file", indipendentemente da quanto siano larghi i permessi di chi chiede.
 
-Nello **stesso account**, di solito basta un `Allow` in uno dei due posti. Tra **account diversi** servono entrambi: l'identità deve essere autorizzata a chiedere e la risorsa deve accettare. (Eccezioni importanti: la trust policy di un role e la key policy di KMS devono sempre autorizzare esplicitamente.)
+Nello stesso account basta un `Allow` in uno dei due posti; tra account diversi servono entrambi (appendice).
 
 ---
 
@@ -208,7 +232,7 @@ Trust policy per un role usato da EC2:
 }
 ```
 
-Tradotto: "il servizio EC2 può assumere questo role". Per collegarlo davvero a un'istanza serve poi un **instance profile**, che vedremo nella dispensa 4.
+Tradotto: "il servizio EC2 può assumere questo role". Per collegarlo davvero a un server serve poi un **instance profile**, che vedremo nella dispensa 4.
 
 ---
 
@@ -223,9 +247,9 @@ Il principio è semplice: **dare solo i permessi necessari, solo sulle risorse n
 
 Strumenti che aiutano:
 
-- **CloudTrail** è il registro delle chiamate API dell'account: per ogni operazione annota chi l'ha fatta, cosa, quando e da dove. È sempre attivo; in console, **CloudTrail → Event history** mostra gli ultimi 90 giorni di operazioni di gestione (creare, modificare, cancellare risorse, assumere role). Le singole letture e scritture di file su S3 sono *data event* e non compaiono lì: per registrarle serve un *trail* dedicato, che vediamo nell'appendice.
-- **IAM Access Analyzer** analizza le policy e segnala le risorse accessibili dall'esterno dell'account. Può anche generare una policy a partire dalle azioni effettivamente usate, lette da CloudTrail.
-- **Last accessed**: nella console IAM, per ogni role, mostra quali servizi ha davvero usato e quando. Quello che non si usa da mesi si toglie.
+- **CloudTrail**: il registro delle chiamate API dell'account (chi, cosa, quando, da dove); in console, **CloudTrail → Event history**.
+- **IAM Access Analyzer**: segnala le risorse accessibili da fuori dell'account e propone policy basate sulle azioni davvero usate.
+- **Last accessed**: nella console IAM, mostra quali servizi un role ha usato e quando; quello che non si usa da mesi si toglie.
 
 ---
 
@@ -267,11 +291,7 @@ IAM è globale e le modifiche impiegano qualche secondo a propagarsi. Può capit
 
 Obiettivo: creare un role con permessi minimi su un bucket, assumerlo dalla CLI e verificare cosa è consentito, cosa è negato implicitamente e cosa è negato esplicitamente.
 
-### Prima di iniziare
-
-- Si lavora nella **stessa cartella** `infra/` della dispensa 0: aggiungi il file `iam.tf` accanto a `main.tf`. Terraform legge tutti i `.tf` insieme, quindi `iam.tf` può usare il bucket `aws_s3_bucket.demo` definito in `main.tf`.
-- La dispensa 0 finiva con un `destroy`: il bucket non esiste più. Nessun problema: l'`apply` di questa dispensa ricrea bucket, file e role tutti insieme.
-- Rinnova il login: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
+I prerequisiti sono nella sezione "Prima di iniziare".
 
 ### iam.tf
 
@@ -362,7 +382,7 @@ Il file contiene due tipi di blocchi: i `data` **non creano niente**, servono a 
 
 **`aws_s3_object.release`** carica un file nel bucket della dispensa 0: `bucket` dice dove, `key` è la chiave del file (il nome completo, con il prefisso `releases/`), `content` è il testo del file. Ci serve solo per avere qualcosa da leggere nelle prove.
 
-**`data.aws_iam_policy_document.trust`** e **`data.aws_iam_policy_document.reader`** non creano niente su AWS: prendono i blocchi HCL e producono il **testo JSON** della policy, che trovi nell'attributo `.json`. Ogni pezzo HCL corrisponde a un campo JSON della sezione 3:
+**`data.aws_iam_policy_document.trust`** e **`data.aws_iam_policy_document.reader`** sono i traduttori della sezione 8. Ogni pezzo HCL corrisponde a un campo JSON della sezione 3:
 
 | HCL (dentro `aws_iam_policy_document`) | JSON della policy |
 |---|---|
@@ -389,7 +409,7 @@ Per esempio, il documento `trust` produce questo JSON:
 
 L'ARN del principal è costruito per interpolazione: `${data.aws_caller_identity.current.account_id}` viene sostituito dal numero dell'account. Così il codice funziona in qualunque account senza modifiche.
 
-Nel documento `reader` i primi due `statement` non hanno `effect`: sono quindi `Allow`. Il terzo ha `effect = "Deny"` esplicito. Il `condition` del primo statement si legge: "consenti `ListBucket` solo se il prefisso richiesto (`s3:prefix`) corrisponde, con confronto `StringLike` (che ammette `*`), a `releases/*`". Nota le due forme di `resources`: `aws_s3_bucket.demo.arn` è l'ARN del **bucket**, `"${aws_s3_bucket.demo.arn}/releases/*"` aggiunge in coda il percorso degli **oggetti**.
+Nel documento `reader` i primi due `statement` non hanno `effect`: sono quindi `Allow`. Il terzo ha `effect = "Deny"` esplicito. Il `condition` del primo statement è l'esempio della sezione 3: `ListBucket` solo sotto `releases/`. Nota le due forme di `resources`: `aws_s3_bucket.demo.arn` è l'ARN del **bucket**, `"${aws_s3_bucket.demo.arn}/releases/*"` aggiunge in coda il percorso degli **oggetti**.
 
 **`aws_iam_role.reader`** crea il role:
 
@@ -493,7 +513,7 @@ Se la prova 1 fallisce subito dopo l'`apply`, aspetta qualche secondo e riprova:
    Ripeti i punti 5 e 6. Cosa succede adesso e perché? (Atteso: la scrittura passa, la cancellazione resta negata: il Deny esplicito vince.) Poi togli la policy con lo stesso comando, scrivendo `detach-role-policy` al posto di `attach-role-policy`. Se la dimentichi attaccata, il `terraform destroy` non riesce a cancellare il role.
 3. Perché al punto 4 viene negato l'elenco della radice ma non la lettura del file?
 4. Nella trust policy, cosa cambierebbe se nel blocco `principals` mettessi `type = "Service"` e `identifiers = ["ec2.amazonaws.com"]` (il JSON della sezione 6)? Potresti ancora assumere il role dalla CLI?
-5. In console apri **CloudTrail → Event history** (regione Milano) e filtra per *Event name* = `AssumeRole`. Trovi le assunzioni del role fatte dalle prove? Chi le ha fatte? (La lettura del file, `GetObject`, qui non la vedi: è un *data event*, sezione 7.)
+5. In console apri **CloudTrail → Event history** (regione Milano) e filtra per *Event name* = `AssumeRole`. Trovi le assunzioni del role fatte dalle prove? Chi le ha fatte? (La lettura del file, `GetObject`, qui non la vedi: le letture e scritture di file su S3 sono *data event*, che Event history non mostra. Per registrarle serve un *trail* dedicato, che vediamo nell'appendice.)
 
 Alla fine: `terraform destroy`. Il file `releases/test.txt` caricato alla domanda 2 non è gestito da Terraform, ma `force_destroy = true` sul bucket (dispensa 0) fa sì che venga cancellato insieme al bucket.
 

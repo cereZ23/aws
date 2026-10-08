@@ -47,7 +47,7 @@ Le route table permettono già a tutte le subnet di parlarsi (la rotta `local`).
 Cosa vuol dire "il server verso internet, porta 443": è il server che **chiama fuori**, mai il contrario. Gli serve per:
 
 - scaricare gli **aggiornamenti di sicurezza** del sistema operativo e i programmi di cui ha bisogno;
-- parlare con i **servizi AWS**, che si raggiungono tutti in HTTPS sulla porta 443: SSM per entrarci senza SSH (dispensa 4), S3 per scaricare la nuova versione dell'applicazione (dispense 7 e 8), Secrets Manager per leggere la password del database (dispensa 6).
+- parlare con i **servizi AWS**, che si raggiungono tutti in HTTPS sulla porta 443: SSM per entrarci senza SSH (dispensa 4), S3 per scaricare la nuova versione dell'applicazione (dispense 7 e 9), Secrets Manager per leggere la password del database (dispensa 6).
 
 Il percorso è quello della dispensa 2: dalla subnet privata al NAT Gateway, poi all'Internet Gateway. Nessuno da internet può iniziare una connessione verso il server.
 
@@ -139,6 +139,10 @@ sequenceDiagram
 ```
 
 È l'errore più comune con le NACL: si apre la porta del servizio e ci si dimentica delle **porte effimere** per le risposte. Lo proveremo nel laboratorio.
+
+> **Alternativa: niente NAT, ogni server con il suo IP pubblico.** Ora che sai come lavora un Security Group, si capisce un'alternativa al NAT Gateway della dispensa 2, che si paga anche quando non lavora. Se i server che devono uscire su internet sono pochi, si mettono nelle **subnet pubbliche**, ognuno con il suo IP pubblico, e il loro Security Group **non ha nessuna regola in ingresso**. L'IP pubblico serve solo per **uscire**: da fuori non entra nessuno, perché il Security Group (stateful) scarta tutto ciò che non è la risposta a una connessione partita dal server. È una scelta frequente nei progetti piccoli.
+>
+> Il prezzo: il server è direttamente su internet, protetto da **una** barriera (il Security Group) invece che da **due** (nessuna strada in ingresso, più il Security Group). Un errore nelle regole lo espone subito. Il database, invece, non va mai lì: resta nelle subnet senza uscita. Nel corso teniamo il NAT, perché rende più facile vedere la differenza tra pubblico e privato.
 
 ---
 

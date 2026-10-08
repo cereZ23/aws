@@ -56,6 +56,8 @@ Per crearne uno servono soprattutto due scelte:
 
 Usiamo **Amazon Linux 2023**, la versione di Linux preparata da AWS. Ha già dentro quello che ci serve, in particolare l'**agente SSM** (sezione 5).
 
+**SSM** (*Systems Manager*) è una cassetta degli attrezzi di AWS per gestire i server. Ne usiamo due attrezzi: **Parameter Store**, dove AWS pubblica l'ID dell'ultima AMI, e **Session Manager**, per entrare nel server (sezione 5).
+
 Ogni regione ha AMI con un **ID** diverso, e AWS ne pubblica di nuove ogni poche settimane, con gli aggiornamenti di sicurezza. Invece di scrivere a mano un ID che invecchia, lo chiediamo ad AWS: AWS pubblica l'ID dell'ultima versione in un **parametro** con un nome fisso, e Terraform lo legge con un *data source* (sezione 7).
 
 ### Il tipo di istanza: quanta potenza
@@ -86,12 +88,20 @@ Nel corso l'applicazione è finta: una pagina web che risponde sulla porta **808
 2. crea un **servizio** di sistema che pubblica la cartella sulla porta 8080 (con un piccolo server web già incluso in Python);
 3. lo avvia e lo fa ripartire da solo a ogni riavvio.
 
+Il servizio lo gestisce **systemd**: è il programma che su Linux avvia e controlla i servizi. Gli basta un piccolo file di testo, diviso in tre parti:
+
+| Parte | Cosa dice a systemd |
+|---|---|
+| `[Unit]` | la descrizione del servizio, e "parti dopo la rete" |
+| `[Service]` | il comando da eseguire, e "riavvialo se si ferma" |
+| `[Install]` | "avvialo a ogni accensione" |
+
 Due regole da sapere:
 
 - lo script gira **una volta sola**, al primo avvio, come amministratore (*root*);
 - se cambi lo script, il server già acceso **non** lo rilegge. Per questo diciamo a Terraform di **ricreare** il server quando lo script cambia (sezione 7).
 
-Nella dispensa 8 il `user_data` installerà l'applicazione vera, scaricandola da S3.
+Nella dispensa 9 il `user_data` installerà l'applicazione vera, scaricandola da S3.
 
 ---
 
@@ -111,6 +121,16 @@ Servono tre pezzi:
 
 L'**instance profile** è un piccolo contenitore che serve solo a una cosa: collegare un role a un'istanza EC2. Un server non indossa un role direttamente: indossa un instance profile, che contiene il role.
 
+Ecco la catena completa, dal role alle credenziali che usa il server:
+
+```mermaid
+flowchart LR
+    R["Role<br/>(trust + permission policy)"] --> IP["Instance profile<br/>(il porta-badge)"]
+    IP --> S["Server EC2"]
+    S -->|"chiede: quali sono<br/>le mie credenziali?"| IMDS["IMDS<br/>(servizio dei metadati, sezione 6)"]
+    IMDS -->|"credenziali temporanee,<br/>rinnovate da sole"| S
+```
+
 Come permission policy usiamo `AmazonSSMManagedInstanceCore`: è una policy **già pronta di AWS** (*AWS managed*, dispensa 1), con esattamente i permessi che servono all'agente SSM. È uno dei rari casi in cui una policy pronta va bene così com'è.
 
 ---
@@ -123,7 +143,7 @@ Il modo classico per entrare in un server Linux è **SSH**: si apre la porta 22 
 - bisogna **custodire le chiavi**, distribuirle, revocarle quando qualcuno se ne va;
 - è difficile sapere **chi ha fatto cosa**.
 
-**SSM Session Manager** (SSM = *Systems Manager*) rovescia il problema. Sul server gira un piccolo programma, l'**agente SSM**, già incluso in Amazon Linux. L'agente **chiama lui** il servizio SSM, in uscita sulla porta 443 (passando dal NAT). Quando vuoi entrare, chiedi ad AWS una sessione, e AWS la "aggancia" alla connessione che l'agente ha già aperto.
+**SSM Session Manager** rovescia il problema. Sul server gira un piccolo programma, l'**agente SSM**, già incluso in Amazon Linux. L'agente **chiama lui** il servizio SSM, in uscita sulla porta 443 (passando dal NAT). Quando vuoi entrare, chiedi ad AWS una sessione, e AWS la "aggancia" alla connessione che l'agente ha già aperto.
 
 ```mermaid
 sequenceDiagram
@@ -308,7 +328,7 @@ Il blocco **`root_block_device`** descrive il disco: tipo `gp3` (il disco SSD st
 **Il `user_data`** è scritto con un *heredoc*: `<<-EOF` apre un testo su più righe, che finisce alla riga `EOF`. Il trattino in `<<-` permette di indentare il testo senza che gli spazi finiscano nello script. Dentro:
 
 - `${var.project}` è un'interpolazione di **Terraform** (dispensa 0): nello script finisce già sostituita, `corso-aws`;
-- `cat > … <<'UNIT' … UNIT` è un secondo heredoc, questa volta di **bash**: scrive il file del servizio. Il file dice: esegui `python3 -m http.server 8080 --directory /opt/app` (un piccolo server web incluso in Python, che pubblica la cartella sulla porta 8080) e riavvialo sempre se si ferma;
+- `cat > … <<'UNIT' … UNIT` è un secondo heredoc, questa volta di **bash**: scrive il file del servizio per systemd (le tre parti della tabella in sezione 3). Il file dice: esegui `python3 -m http.server 8080 --directory /opt/app` (un piccolo server web incluso in Python, che pubblica la cartella sulla porta 8080) e riavvialo sempre se si ferma;
 - `systemctl enable --now app` attiva il servizio e lo avvia subito.
 
 `user_data_replace_on_change = true` dice a Terraform: se lo script cambia, **ricrea** il server, perché uno script cambiato su un server già acceso non verrebbe rieseguito.
@@ -345,7 +365,7 @@ Obiettivo: creare il server, entrarci con SSM, verificare l'applicazione e i fir
    curl -sI --max-time 5 http://example.com        # porta 80 verso internet
    ```
 
-   (Atteso: la prima risponde, `HTTP/2 200`; la seconda **resta in attesa e scade**. Perché? Il SG `app` in uscita consente solo la 443, dispensa 3.)
+   (Atteso: la prima risponde con una riga che inizia con `HTTP/`; la seconda **resta in attesa e scade**. Perché? Il SG `app` in uscita consente solo la 443, dispensa 3.)
 6. **Chi sono?** Nel server: `aws sts get-caller-identity`. (Atteso: un ARN `assumed-role/corso-aws-app-server/i-0abc…`. Il server usa il role, con credenziali temporanee che nessuno ha scritto da nessuna parte.)
 7. **Il `user_data`.** Cambia il testo della pagina nel `user_data` e lancia `terraform plan`. Cosa propone, e perché? (Atteso: `-/+`, il server viene ricreato: `user_data_replace_on_change`.) Applica e verifica di nuovo il passo 4 con una nuova sessione.
 8. **Chi è entrato.** In console: **Systems Manager → Session Manager → Session history**. Trovi le tue sessioni?
