@@ -10,11 +10,11 @@ Alla fine di questa dispensa:
 
 - sai cos'è una **VPN** e come funziona **Tailscale**;
 - sai cos'è un **subnet router** e perché ne serve uno per raggiungere la rete AWS;
-- sai come Tailscale riconosce chi si collega, con il login di **Google, Microsoft o GitHub** e la sua **MFA**;
+- sai come Tailscale riconosce chi si collega, con una **passkey** o un account personale (Google, Microsoft, GitHub), e come ottenere l'**MFA** senza nessun sistema di login aziendale;
 - sai dare permessi diversi per **gruppo**: gli amministratori raggiungono anche il database, gli sviluppatori solo l'applicazione;
 - dal tuo computer, a casa, apri l'applicazione della dispensa 4 sulla porta 8080, come se fossi dentro la rete.
 
-> **Perché Tailscale e non la VPN di AWS?** AWS ha un suo servizio di VPN (*AWS Client VPN*), ma si paga a ore per ogni subnet collegata anche quando nessuno lo usa, e la configurazione del login con MFA è lunga. Tailscale ha un piano gratuito per piccoli gruppi, ci costa solo un server piccolissimo, e l'MFA arriva dal login che usi già.
+> **Perché Tailscale e non la VPN di AWS?** AWS ha un suo servizio di VPN (*AWS Client VPN*), ma si paga a ore per ogni subnet collegata anche quando nessuno lo usa, e la configurazione del login con MFA è lunga. Tailscale ha un piano gratuito per piccoli gruppi, ci costa solo un server piccolissimo, e l'MFA arriva da una passkey o dal login che usi già, senza bisogno di un sistema di login aziendale.
 
 ---
 
@@ -22,7 +22,7 @@ Alla fine di questa dispensa:
 
 - Si lavora nella **stessa cartella** `infra/`: questa dispensa aggiunge il file `tailscale.tf`, alcune variabili e un nuovo provider.
 - Servono la rete (dispensa 2), il Security Group `vpn` (dispensa 3) e il server dell'applicazione con il suo instance profile (dispensa 4).
-- Ti serve un **account Tailscale**: si crea su tailscale.com facendo il login con un account **Google, Microsoft o GitHub**. Su quell'account deve essere **attiva l'MFA** (la verifica in due passaggi): è lei a proteggere la VPN.
+- Ti serve un **account Tailscale**: si crea su tailscale.com con una **passkey** (l'impronta, il viso o il PIN del tuo computer o telefono) oppure con un account personale **Google, Microsoft o GitHub** che abbia la **verifica in due passaggi** attiva. **Non serve nessun sistema di login aziendale** (sezione 5).
 - Installa **Tailscale** sul tuo computer (Windows, macOS, Linux; anche sul telefono) e fai il login con lo stesso account.
 - Rinnova il login AWS: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
 - **Costi:** su AWS si aggiunge un server EC2 piccolissimo (il router), che si paga a ore, più il NAT della dispensa 2. Tailscale, per l'uso del corso, rientra nel piano gratuito (controlla le condizioni attuali sul sito). Alla fine: `terraform destroy`.
@@ -97,18 +97,26 @@ Il router deve annunciare le subnet che vogliamo raggiungere (*advertise routes*
 
 ## 5. Chi si collega: login e MFA
 
-Tailscale non ha password sue: per entrare nel tailnet si fa il login con un **account esistente**, per esempio Google, Microsoft o GitHub, o con il sistema di login dell'azienda. È quel servizio a verificare chi sei.
+Tailscale non ha password sue. Per entrare nel tailnet ti identifichi in uno di questi modi, e **nessuno richiede un sistema di login aziendale** (quello che nei documenti tecnici si chiama *IdP*, *identity provider*):
+
+| Modo | Come funziona | Il secondo fattore (MFA) |
+|---|---|---|
+| **Passkey** (consigliata) | ti registri su Tailscale con l'impronta, il viso o il PIN del tuo computer o telefono. Nessun account esterno | **c'è già**: serve il tuo dispositivo **e** la tua impronta o il PIN. È anche il modo più resistente al phishing |
+| **Account personale** Google, Microsoft o GitHub | fai il login con quell'account | solo se su quell'account è attiva la **verifica in due passaggi** |
+| **Login aziendale** (Okta, Entra ID…) | per le aziende che ce l'hanno già | lo gestisce l'azienda |
 
 Ne segue la regola più importante della dispensa:
 
-> **L'MFA la fa il servizio di login.** Se l'account Google (o Microsoft, o GitHub) con cui entri in Tailscale ha la verifica in due passaggi attiva, per entrare nel tailnet servono password **e** codice dal telefono. Se non ce l'ha, la VPN è protetta solo da una password. Per tutti gli utenti del tailnet, la verifica in due passaggi è **obbligatoria**.
+> **Nessuno entra nel tailnet con una sola password.** Con la passkey il secondo fattore c'è già. Con un account Google, Microsoft o GitHub, la verifica in due passaggi su quell'account è **obbligatoria**: se non ce l'ha, la VPN sarebbe protetta da una password sola.
+
+Nei gruppi della policy (sezione 6) ogni persona si indica con il suo **nome di login in Tailscale**: lo trovi nella console di Tailscale, alla voce **Users**. Per chi usa un account Google è la sua email.
 
 In più, Tailscale aggiunge due protezioni utili:
 
 - **scadenza delle chiavi**: ogni dispositivo deve rifare il login periodicamente;
 - **approvazione dei dispositivi** (facoltativa): un amministratore approva ogni nuovo dispositivo prima che entri nel tailnet.
 
-Quando una persona lascia l'azienda, basta disattivare il suo account di login (o rimuoverla da Tailscale) e perde subito l'accesso.
+Quando una persona lascia il gruppo di lavoro, la si rimuove da Tailscale (**Users**) e perde subito l'accesso.
 
 ---
 
@@ -120,7 +128,7 @@ La policy ha quattro parti:
 
 | Parte | Cosa dice | Nel corso |
 |---|---|---|
-| `groups` | chi appartiene a quale gruppo | `group:admin` e `group:dev`, con le email delle persone |
+| `groups` | chi appartiene a quale gruppo | `group:admin` e `group:dev`, con i nomi di login delle persone |
 | `tagOwners` | chi può assegnare un'etichetta (*tag*) ai dispositivi | l'etichetta `tag:router-aws` per il nostro router |
 | `acls` | le regole: **chi** può raggiungere **cosa**, su quali porte | vedi tabella sotto |
 | `autoApprovers` | quali dispositivi possono annunciare subnet senza approvazione manuale | il router, con la sua etichetta |
@@ -201,12 +209,12 @@ Il provider di Tailscale ha bisogno di una **chiave API** per parlare con il tuo
 
 ```hcl
 variable "tailscale_admins" {
-  description = "Email degli amministratori (gruppo admin)"
+  description = "Nomi di login Tailscale degli amministratori (gruppo admin)"
   type        = list(string)
 }
 
 variable "tailscale_devs" {
-  description = "Email degli sviluppatori (gruppo dev)"
+  description = "Nomi di login Tailscale degli sviluppatori (gruppo dev)"
   type        = list(string)
   default     = []
 }
@@ -353,7 +361,7 @@ resource "aws_instance" "tailscale_router" {
 
 **1. La policy.** `tailscale_acl` scrive nel tuo tailnet la policy della sezione 6. Il contenuto è un documento JSON (dispensa 1): invece di scriverlo a mano lo costruiamo con la funzione **`jsonencode()`**, che trasforma una mappa HCL in JSON. Così possiamo usare variabili ed espressioni dentro la policy.
 
-- `groups`: le liste di email arrivano dalle variabili `tailscale_admins` e `tailscale_devs`.
+- `groups`: le liste dei nomi di login arrivano dalle variabili `tailscale_admins` e `tailscale_devs`.
 - `acls`: ogni regola ha `src` (chi) e `dst` (cosa). Le destinazioni hanno la forma `indirizzi:porta`. Le costruiamo con espressioni `for` (dispensa 2) sulle liste di CIDR della dispensa 3: `[for cidr in local.private_cidrs : "${cidr}:8080"]` dà `["10.20.10.0/24:8080", "10.20.11.0/24:8080"]`. La funzione **`concat()`** unisce due liste in una.
 - `autoApprovers`: un'espressione `for` che costruisce una mappa "subnet → chi può annunciarla": tutte le nostre subnet, solo il router con il suo tag. Senza questa parte, ogni subnet annunciata andrebbe approvata a mano nella console di Tailscale.
 - `overwrite_existing_content = true`: la policy del tailnet la gestisce **solo** Terraform. Se qualcuno la modifica a mano, il `plan` successivo lo mostra (il *drift* della dispensa 0).
@@ -409,7 +417,7 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 
 ### Passi
 
-1. **Account e MFA.** Verifica che l'account (Google, Microsoft o GitHub) con cui entri in Tailscale abbia la **verifica in due passaggi** attiva. Installa Tailscale sul tuo computer e fai il login: nella console web di Tailscale (**Machines**) compare il tuo computer, con un indirizzo `100.x.y.z`.
+1. **Account e MFA.** Crea il tuo account Tailscale con una **passkey**, oppure con un account Google, Microsoft o GitHub che abbia la **verifica in due passaggi** attiva. Installa Tailscale sul tuo computer e fai il login: nella console web di Tailscale (**Machines**) compare il tuo computer, con un indirizzo `100.x.y.z`. Alla voce **Users** trovi il tuo nome di login: serve al passo 3.
 2. **La chiave API.** Nella console di Tailscale: **Settings → Keys → Generate API access token**. Copiala e, nel terminale:
 
    ```bash
@@ -417,10 +425,10 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
    ```
 
    Come le credenziali AWS, la chiave resta nel terminale: **mai** nei file del progetto. (Su Windows PowerShell: `$env:TAILSCALE_API_KEY="…"`.)
-3. **I valori.** In `terraform.tfvars`, con l'email con cui hai fatto il login in Tailscale:
+3. **I valori.** In `terraform.tfvars`, con il tuo nome di login in Tailscale (passo 1):
 
    ```hcl
-   tailscale_admins = ["tu@example.com"]
+   tailscale_admins = ["il-tuo-nome-di-login"]
    tailscale_devs   = []
    ```
 
@@ -434,9 +442,9 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 
    (Atteso: `<h1>Ciao dal server di corso-aws</h1>`.) Prova anche ad aprire lo stesso indirizzo nel browser. Stai raggiungendo un server in una subnet privata, senza indirizzo pubblico, da casa tua.
 7. **Spegni Tailscale** sul tuo computer e ripeti il passo 6. (Atteso: non risponde. Senza il tunnel, la rete privata non si raggiunge.) Riaccendilo.
-8. **Il gruppo.** In `terraform.tfvars` sposta la tua email da `tailscale_admins` a `tailscale_devs`, lancia `apply` e ripeti il passo 6. (Atteso: funziona ancora, gli sviluppatori raggiungono la 8080.) La prova sul database la faremo nella dispensa 6. Poi rimettiti tra gli amministratori.
+8. **Il gruppo.** In `terraform.tfvars` sposta il tuo nome da `tailscale_admins` a `tailscale_devs`, lancia `apply` e ripeti il passo 6. (Atteso: funziona ancora, gli sviluppatori raggiungono la 8080.) La prova sul database la faremo nella dispensa 6. Poi rimettiti tra gli amministratori.
 
-   Attenzione: `tailscale_admins` deve contenere almeno un'email, perché il tag del router lo assegnano gli amministratori.
+   Attenzione: `tailscale_admins` deve contenere almeno un nome, perché il tag del router lo assegnano gli amministratori.
 9. **Dentro il router.** Entra nel router con SSM, come nella dispensa 4, e lancia `tailscale status`: vedi l'elenco dei dispositivi del tailnet, compreso il tuo computer.
 10. **Pulizia.** `terraform destroy`. Il router scompare anche dalla console di Tailscale, perché era *effimero*. Nella console di Tailscale puoi revocare la chiave API (**Settings → Keys**).
 
@@ -444,7 +452,7 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 
 1. Perché il router può stare in una subnet privata, senza indirizzo pubblico e senza porte aperte in ingresso?
 2. A cosa serve il subnet router? Perché non installiamo Tailscale direttamente sul database?
-3. Chi fa l'MFA quando ti colleghi a Tailscale? Cosa succede se l'account Google di un collega non ha la verifica in due passaggi?
+3. Chi fa l'MFA quando ti colleghi a Tailscale con una passkey? E con un account Google? Cosa succede se l'account Google di un collega non ha la verifica in due passaggi?
 4. Uno sviluppatore prova a collegarsi al database. Chi lo blocca: Tailscale o il Security Group? E un amministratore, passa?
 5. Per il database, da quale indirizzo arriva una connessione fatta da casa tramite Tailscale? Perché è importante per le regole della dispensa 3?
 6. Perché la chiave d'ingresso del router è monouso e scade dopo un'ora?
@@ -455,7 +463,7 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 
 - La **VPN** è un tunnel cifrato dal tuo computer alla rete privata. **Tailscale** collega i dispositivi in un **tailnet**, con traffico diretto e cifrato e **nessuna porta da aprire**.
 - Il **subnet router** è un piccolo server EC2 nella subnet privata che annuncia le nostre subnet al tailnet. Indossa il **SG `vpn`**, quindi le regole della dispensa 3 valgono senza modifiche.
-- Il **login** è quello di Google, Microsoft o GitHub, e **l'MFA la fa lui**: va resa obbligatoria per tutti.
+- Il login **non richiede un sistema aziendale**: una **passkey** (MFA già inclusa) o un account Google, Microsoft o GitHub con la **verifica in due passaggi obbligatoria**.
 - La **policy del tailnet** dice chi raggiunge cosa: `group:admin` anche il database sulla 5432, `group:dev` solo l'applicazione sulla 8080. Poi decidono i **Security Group**.
 - Terraform gestisce **tutto**: la policy, la chiave d'ingresso (monouso, breve, effimera) e il router.
 - **SSM** per i comandi sul server, **Tailscale** per i collegamenti di rete.
