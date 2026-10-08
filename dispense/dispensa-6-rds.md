@@ -13,6 +13,7 @@ Alla fine di questa dispensa:
 - sai la differenza tra **Multi-AZ istanza**, **Multi-AZ DB cluster** e **read replica**, e quando usare quale;
 - sai cosa succede durante un **failover** e cosa deve fare l'applicazione per sopravvivere;
 - sai come funzionano **backup** e **ripristino a un momento preciso** (PITR), e cosa vuol dire che il database è **cifrato con KMS**;
+- sai **obbligare** l'applicazione a parlare con il database in modo cifrato (**TLS**) e a **verificare** di parlare con il database vero;
 - sai far generare e custodire la **password** del database ad AWS, in **Secrets Manager**, senza che nessuno la scriva mai;
 - sai proteggere il database da una **cancellazione per sbaglio**;
 - hai provocato un failover vero e hai visto l'applicazione riconnettersi.
@@ -39,6 +40,7 @@ L'applicazione ha bisogno di un database **PostgreSQL**. Vogliamo che:
 | **sopravviva alla caduta di un data center** | se un'AZ si ferma, l'applicazione deve ripartire in un paio di minuti, senza perdere dati |
 | abbia **backup automatici**, e si possa tornare indietro a un minuto preciso | un errore umano ("ho cancellato la tabella sbagliata") deve essere rimediabile |
 | sia **cifrato** | una copia del disco o di un backup, da sola, non deve essere leggibile |
+| accetti solo connessioni **cifrate e verificate** | password e dati non devono viaggiare in chiaro, nemmeno dentro il VPC |
 | abbia una **password che nessuno scrive** | niente password nel codice, nel tfvars o nello state (dispensa 0) |
 | non si possa **cancellare per sbaglio** | un `terraform destroy` lanciato nella cartella sbagliata non deve distruggere i dati |
 | accetti connessioni **solo** dall'applicazione e dagli amministratori in VPN | le regole le abbiamo già scritte nelle dispense 3 e 5 |
@@ -213,7 +215,9 @@ Oltre agli snapshot automatici esistono gli **snapshot manuali**, che fai tu qua
 
 ---
 
-## 7. La cifratura e KMS
+## 7. La cifratura: KMS per i dati fermi, TLS per quelli in viaggio
+
+### I dati fermi: il disco e KMS
 
 Chiediamo che il database sia **cifrato** (`storage_encrypted = true`): il disco, i backup, gli snapshot e lo standby. Chi ottenesse una copia del disco, senza la chiave, vedrebbe solo dati senza senso.
 
@@ -228,6 +232,27 @@ Le chiavi di cifratura in AWS le custodisce **KMS** (*Key Management Service*): 
 | Nel corso | **sì** | no: la vediamo nell'appendice |
 
 Una regola da ricordare: la cifratura si sceglie **alla creazione**. Un database creato non cifrato non si può cifrare dopo: bisogna fare uno snapshot, copiarlo cifrato e ripristinarlo in un database nuovo. Per questo si cifra sempre, da subito.
+
+### I dati in viaggio: TLS
+
+`storage_encrypted` protegge i dati **fermi**, quelli scritti sul disco. Ma i dati viaggiano anche sulla rete: la query dell'applicazione, i risultati, **la password** al momento del login. Per proteggerli serve **TLS**, la stessa cifratura dei siti `https://`.
+
+Con TLS ci sono due cose diverse da ottenere, e vanno chieste tutte e due:
+
+| | Cosa garantisce | Come si chiede a `psql` (e alle librerie dei programmi) |
+|---|---|---|
+| **Cifrare** | chi sta sulla strada non può leggere | `sslmode=require` |
+| **Verificare il server** | stai parlando con il database **vero**, non con un impostore che si finge lui | `sslmode=verify-full`, più il **certificato** di AWS |
+
+> **Analogia.** Cifrare è mettere la lettera in una **busta chiusa**. Verificare è **controllare il documento** di chi la riceve. Una busta chiusa consegnata all'impostore la apre l'impostore: servono tutte e due.
+
+**Dal lato del database** c'è un'impostazione di PostgreSQL su RDS, `rds.force_ssl`: con il valore `1`, il database **rifiuta** ogni connessione non cifrata. Dalla versione 15 è già attiva di default, ma la scriviamo lo stesso nel nostro codice: un'impostazione di sicurezza che dipende da un valore di default che non vedi è un'impostazione che può sparire senza che nessuno se ne accorga.
+
+Su un PostgreSQL normale le impostazioni stanno in un file di configurazione. Su RDS a quel file non si accede: le impostazioni si scrivono in un **parameter group**, un elenco di impostazioni che si collega al database. Ogni parameter group appartiene a una **famiglia**, legata alla versione principale: per PostgreSQL 18 è `postgres18`.
+
+**Dal lato dell'applicazione** serve `sslmode=verify-full` con il **certificato della CA di AWS** (*Certificate Authority*, l'ente che firma i certificati dei database RDS). AWS lo pubblica in un file, `global-bundle.pem`, che si scarica da `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`. Con `verify-full` il client controlla due cose: che il certificato del database sia firmato da AWS, e che contenga **il nome a cui ti stai collegando**. Per questo ci si collega al **nome dell'endpoint**, non all'indirizzo IP: un motivo in più, dopo quello della sezione 5.
+
+E il tunnel di Tailscale? Cifra il tratto **da casa al router**. Dal router al database, e dal server dell'applicazione al database, il traffico viaggia nel VPC. TLS cifra **tutto il percorso**, da un capo all'altro, chiunque sia il mittente.
 
 ---
 
@@ -282,7 +307,7 @@ Le regole di rete per il database le abbiamo scritte prima di averlo, e ora le u
 | SG `db` | 5432 solo da chi ha il SG `app` o il SG `vpn` | 3 |
 | Policy del tailnet | solo `group:admin` raggiunge la 5432; `group:dev` no | 5 |
 
-In più, il database ha `publicly_accessible = false`: AWS non gli dà nessun indirizzo pubblico. E PostgreSQL su RDS accetta solo connessioni **cifrate** (TLS): nelle prove useremo `sslmode=require`.
+In più, il database ha `publicly_accessible = false`: AWS non gli dà nessun indirizzo pubblico. E accetta solo connessioni **cifrate** (`rds.force_ssl = 1`, sezione 7); i client verificano che sia il database vero (`sslmode=verify-full`).
 
 ---
 
@@ -328,6 +353,24 @@ resource "aws_db_subnet_group" "main" {
   subnet_ids = [for s in aws_subnet.db : s.id]
 }
 
+# ---------------------------------------------------------------
+# Le impostazioni di PostgreSQL: solo connessioni cifrate
+# ---------------------------------------------------------------
+
+resource "aws_db_parameter_group" "main" {
+  name   = "${var.project}-postgres${var.db_engine_version}"
+  family = "postgres${var.db_engine_version}"
+
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # Suffisso casuale per il nome dello snapshot finale
 resource "random_id" "db_final_snapshot" {
   byte_length = 4
@@ -342,6 +385,9 @@ resource "aws_db_instance" "main" {
   engine         = "postgres"
   engine_version = var.db_engine_version
   instance_class = var.db_instance_class
+
+  # Le impostazioni: connessioni solo cifrate
+  parameter_group_name = aws_db_parameter_group.main.name
 
   # Il disco: SSD gp3, cifrato, cresce da solo fino a 100 GB
   allocated_storage     = 20
@@ -423,6 +469,10 @@ output "db_secret_arn" {
 
 **`aws_db_subnet_group.main`** è l'elenco delle subnet in cui il database può stare (sezione 3). `subnet_ids` usa un'espressione `for` sulla mappa delle subnet database della dispensa 2: la lista dei loro ID, una per AZ.
 
+**`aws_db_parameter_group.main`** è l'elenco delle impostazioni di PostgreSQL (sezione 7). `family` è la famiglia, costruita dalla versione principale: con `"18"` diventa `"postgres18"`. Ogni blocco `parameter` è un'impostazione, con il suo nome e il suo valore; qui ce n'è una sola, `rds.force_ssl = "1"`. Il valore va scritto tra virgolette, come testo, anche se è un numero.
+
+Il blocco `lifecycle { create_before_destroy = true }` serve il giorno in cui si cambia versione principale. Il nome e la famiglia cambiano, quindi il parameter group va ricreato (`-/+`, dispensa 0). Normalmente Terraform **prima cancella** la risorsa vecchia e **poi crea** la nuova; ma un parameter group collegato a un database non si può cancellare, e l'`apply` si fermerebbe. Con `create_before_destroy` l'ordine si inverte: prima crea il gruppo nuovo, lo collega al database, poi cancella il vecchio. (L'aggiornamento della versione principale, in sé, è un'operazione delicata che non vediamo nel corso.)
+
 **`random_id.db_final_snapshot`** genera un suffisso casuale, per esempio `a1b2c3d4`, che finisce nel nome dello snapshot finale (sezione 9). Si genera una volta e resta lo stesso finché esiste il progetto.
 
 **`aws_db_instance.main`** è il database. Leggiamo gli argomenti a gruppi.
@@ -433,6 +483,7 @@ output "db_secret_arn" {
 | `engine` | `"postgres"` | il motore: PostgreSQL |
 | `engine_version` | `"18"` | solo la versione principale: la versione minore la sceglie AWS e la aggiorna da sola (`auto_minor_version_upgrade`) |
 | `instance_class` | `db.t4g.micro` | il tipo di macchina; come per EC2, `t4g` = piccola e con processore Graviton |
+| `parameter_group_name` | `aws_db_parameter_group.main.name` | le impostazioni: connessioni solo cifrate |
 
 **Il disco.** `allocated_storage = 20` sono i GB iniziali; `max_allocated_storage = 100` permette a RDS di **ingrandirlo da solo** quando si riempie, fino a 100 GB, senza fermare niente. `storage_encrypted = true` lo cifra con la chiave `aws/rds` (sezione 7): non scrivendo `kms_key_id`, si usa quella.
 
@@ -462,7 +513,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
 
 ### Passi
 
-1. **`terraform plan`**. Le risorse nuove sono: il subnet group, il suffisso casuale, il database, la policy con il suo attachment. C'è una password da qualche parte nel plan? (Atteso: no.)
+1. **`terraform plan`**. Le risorse nuove sono: il subnet group, il parameter group, il suffisso casuale, il database, la policy con il suo attachment. C'è una password da qualche parte nel plan? (Atteso: no.)
 2. **`terraform apply`**, poi aspetta: 15-20 minuti. In console: **RDS → Databases → corso-aws-db**. Nella scheda **Configuration** controlla *Multi-AZ: Yes*; nella scheda **Connectivity & security** trovi l'endpoint e la porta 5432.
 3. **La password.** In console: **Secrets Manager → Secrets**. C'è un segreto il cui nome inizia con `rds!db-`: è quello creato da RDS. Apri **Rotation**: è attiva ogni 7 giorni. Poi apri lo state: `terraform state show aws_db_instance.main`. La password c'è? (Atteso: no, solo l'ARN del segreto.)
 4. **Dal server dell'applicazione.** Leggi i due valori dal tuo computer:
@@ -485,25 +536,43 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
    export DB_HOST="corso-aws-db.….rds.amazonaws.com"
    export SECRET_ARN="arn:aws:secretsmanager:…"
 
+   # il certificato della CA di AWS, per verificare il database
+   curl -sSo /root/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+
    # la password, letta dal segreto con il role del server
    export PGPASSWORD=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" \
      --query SecretString --output text \
      | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
 
-   export DB="host=$DB_HOST dbname=app user=dbadmin sslmode=require"
+   export DB="host=$DB_HOST dbname=app user=dbadmin sslmode=verify-full sslrootcert=/root/global-bundle.pem"
    psql "$DB" -c "select version();"
+   psql "$DB" -c "select ssl, version from pg_stat_ssl where pid = pg_backend_pid();"
    ```
 
-   (Atteso: `PostgreSQL 18.…`. Il server ha letto la password grazie a `secrets.tf` ed è passato dal SG `db` grazie alla regola `db_from_app`.) Domanda: se togliessi `secrets.tf`, quale comando fallirebbe, e con quale errore?
+   (Atteso: `PostgreSQL 18.…`; la seconda query risponde `t` e una versione di TLS, per esempio `TLSv1.3`: questa connessione è cifrata. Il server ha letto la password grazie a `secrets.tf` ed è passato dal SG `db` grazie alla regola `db_from_app`.) Domanda: se togliessi `secrets.tf`, quale comando fallirebbe, e con quale errore?
 
-5. **Da casa, come amministratore.** Con Tailscale acceso e il tuo nome in `tailscale_admins` (dispensa 5), installa `psql` sul tuo computer (su Mac: `brew install libpq`; oppure un programma grafico come DBeaver). Leggi la password con il tuo login AWS:
+   Ora prova le due cose che **non** devono funzionare:
 
    ```bash
+   # senza cifratura
+   psql "host=$DB_HOST dbname=app user=dbadmin sslmode=disable" -c "select 1;"
+
+   # con l'indirizzo IP al posto del nome
+   DB_IP=$(getent hosts "$DB_HOST" | cut -d' ' -f1)
+   psql "host=$DB_IP dbname=app user=dbadmin sslmode=verify-full sslrootcert=/root/global-bundle.pem" -c "select 1;"
+   ```
+
+   (Atteso: la prima viene **rifiutata dal database**, con un errore che finisce con `no encryption`: è `rds.force_ssl`. La seconda viene **rifiutata dal client**: il certificato del database contiene il nome, non l'indirizzo, e `verify-full` non si fida.)
+
+5. **Da casa, come amministratore.** Con Tailscale acceso e il tuo nome in `tailscale_admins` (dispensa 5), installa `psql` sul tuo computer (su Mac: `brew install libpq`; oppure un programma grafico come DBeaver). Scarica il certificato e leggi la password con il tuo login AWS:
+
+   ```bash
+   curl -sSo global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
    aws secretsmanager get-secret-value --secret-id "$(terraform output -raw db_secret_arn)" \
      --query SecretString --output text
    ```
 
-   e collegati con `psql "host=$(terraform output -raw db_address) dbname=app user=dbadmin sslmode=require"`, incollando la password quando la chiede. (Atteso: funziona. Il nome dell'endpoint, anche da casa, porta all'indirizzo privato `10.20.20.x`, che raggiungi attraverso il router.) Non lasciare la password in giro: chiudi il terminale quando hai finito.
+   e collegati con `psql "host=$(terraform output -raw db_address) dbname=app user=dbadmin sslmode=verify-full sslrootcert=global-bundle.pem"`, incollando la password quando la chiede. (Atteso: funziona. Il nome dell'endpoint, anche da casa, porta all'indirizzo privato `10.20.20.x`, che raggiungi attraverso il router.) Non lasciare la password in giro: chiudi il terminale quando hai finito.
 6. **Da casa, come sviluppatore.** Sposta il tuo nome in `tailscale_devs`, lancia `apply` e riprova il passo 5. (Atteso: la connessione **resta in attesa e scade**. Chi ti blocca? Tailscale: la policy del tailnet non dà a `group:dev` la porta 5432. Il SG `db` non c'entra: ti avrebbe fatto passare, perché arrivi dal router.) Rimettiti in `tailscale_admins` e fai `apply`.
 7. **Rompi la NACL (dispensa 3).** In `security.tf` commenta il blocco `db_out_ephemeral`, e questa volta **applica**. Dal server, ripeti `psql "$DB" -c "select 1;"`. (Atteso: resta in attesa. La richiesta arriva al database sulla 5432, ma la risposta non può uscire dalla subnet database verso le porte effimere.) Togli i `#`, applica di nuovo, riprova: funziona.
 8. **Il failover.** Nel server, lancia un ciclo che si collega ogni 2 secondi e stampa l'indirizzo del database che ha risposto:
@@ -548,6 +617,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
 5. Perché non generiamo la password con `random_password` di Terraform, che pure è comodo?
 6. Nell'esercizio, lo sviluppatore non raggiunge il database. Se un giorno Tailscale gli desse la 5432 per errore, il SG `db` lo fermerebbe? Perché?
 7. Cosa succede, passo per passo, se lanci `terraform destroy` con `deletion_protection = true`?
+8. Con `sslmode=require` la connessione è cifrata. Perché non basta? Cosa aggiunge `verify-full`, e perché con `verify-full` bisogna usare il nome dell'endpoint?
 
 ---
 
@@ -559,5 +629,6 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
 - Ci si collega all'**endpoint**, un nome DNS: nel failover cambia l'indirizzo, non il nome. L'applicazione deve **riprovare** e rileggere il nome.
 - **Backup** automatici per 7 giorni e **PITR**: si ripristina a un minuto preciso, sempre in un **database nuovo**. Il Multi-AZ protegge dai guasti, i backup dagli errori.
 - Disco, backup e standby **cifrati** con una chiave di **KMS**; la cifratura si decide alla creazione.
+- In viaggio, **TLS**: il database rifiuta le connessioni in chiaro (`rds.force_ssl = 1`, nel nostro **parameter group**) e i client verificano di parlare con il database vero (`sslmode=verify-full` con il certificato di AWS).
 - La password la genera RDS e la custodisce **Secrets Manager** (`manage_master_user_password`), con rotazione ogni 7 giorni: non è nel codice né nello state. Il server la legge con una policy che dà **solo** quel segreto.
 - **`deletion_protection`** impedisce la cancellazione; lo **snapshot finale** resta anche dopo una cancellazione voluta.
