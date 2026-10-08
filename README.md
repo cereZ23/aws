@@ -53,7 +53,7 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 3 | **Firewall**: Security Group e NACL, porte, stateful e stateless | [dispensa-3-firewall.md](dispense/dispensa-3-firewall.md) | [slide-3-firewall.pptx](slide/slide-3-firewall.pptx) | ✅ Pronta |
 | 4 | **EC2: il server**: AMI, user_data, role e instance profile, SSM senza SSH | [dispensa-4-ec2.md](dispense/dispensa-4-ec2.md) | [slide-4-ec2.pptx](slide/slide-4-ec2.pptx) | ✅ Pronta |
 | 5 | **Accesso remoto: Tailscale**: subnet router, login con passkey o GitHub + Google Authenticator, permessi per gruppo | [dispensa-5-tailscale.md](dispense/dispensa-5-tailscale.md) | [slide-5-tailscale.pptx](slide/slide-5-tailscale.pptx) | ✅ Pronta |
-| 6 | **RDS PostgreSQL** in alta affidabilità | – | – | In preparazione |
+| 6 | **RDS PostgreSQL in alta affidabilità**: Multi-AZ e failover, backup e PITR, KMS, password in Secrets Manager, protezione dalla cancellazione | [dispensa-6-rds.md](dispense/dispensa-6-rds.md) | [slide-6-rds.pptx](slide/slide-6-rds.pptx) | ✅ Pronta |
 | 7 | **S3**: il repository degli artefatti | – | – | In preparazione |
 | 8 | **Deploy end-to-end** | – | – | In preparazione |
 | A | **Appendice**: IAM avanzato e audit | – | – | In preparazione |
@@ -92,6 +92,7 @@ infra/
 ├── ec2.tf             # lezione 4
 ├── tailscale.tf       # lezione 5
 ├── rds.tf             # lezione 6
+├── secrets.tf         # lezione 6: il server legge la password del database
 ├── s3.tf              # lezione 7
 └── outputs.tf         # cosa stampare alla fine
 ```

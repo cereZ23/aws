@@ -236,7 +236,7 @@ Nella dispensa su S3 vedremo anche i **VPC endpoint**, che permettono di raggiun
 
 Il **DNS** è la rubrica della rete: traduce un nome (es. `corso-db.xxxx.eu-south-1.rds.amazonaws.com`) nell'indirizzo IP da contattare. Nessuno scrive gli IP a mano: i servizi AWS si raggiungono per nome.
 
-Due opzioni del VPC vanno **entrambe attive**: `enable_dns_support` accende la risoluzione dei nomi dentro il VPC, `enable_dns_hostnames` dà un nome DNS alle risorse. Senza, non funzionano il nome del database RDS (dispensa 6), l'accesso ai server con SSM Session Manager (dispensa 5) e i VPC endpoint (dispensa 7). È un errore che si scopre tardi, con sintomi che sembrano tutt'altro.
+Due opzioni del VPC vanno **entrambe attive**: `enable_dns_support` accende la risoluzione dei nomi dentro il VPC, `enable_dns_hostnames` dà un nome DNS alle risorse. Senza, non funzionano il nome del database RDS (dispensa 6), l'accesso ai server con SSM Session Manager (dispensa 4) e i VPC endpoint (dispensa 7). È un errore che si scopre tardi, con sintomi che sembrano tutt'altro.
 
 Il VPC nasce anche con un **Security Group** e una **NACL** di default. Non li tocchiamo qui: sono firewall, e li vediamo nella dispensa 3, dove si spiega anche perché il Security Group di default va svuotato.
 
