@@ -24,6 +24,8 @@ flowchart LR
     L5 --> L6["6 · RDS"]
     L6 --> L7["7 · ECR e S3"]
     L7 --> L8["8 · Deploy"]
+    L8 --> L9["9 · Allarmi"]
+    L9 -.-> L10["10 · EFS e Backup<br/>(facoltativa)"]
 ```
 
 ---
@@ -56,6 +58,7 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 6 | **RDS PostgreSQL in alta affidabilità**: Multi-AZ e failover, backup e PITR, KMS, password in Secrets Manager, protezione dalla cancellazione | [dispensa-6-rds.md](dispense/dispensa-6-rds.md) | [slide-6-rds.pptx](slide/slide-6-rds.pptx) | ✅ Pronta |
 | 7 | **Immagini e artefatti**: container e immagini, ECR con tag immutabili, bucket S3 chiuso a chiave, Gateway Endpoint | [dispensa-7-ecr-s3.md](dispense/dispensa-7-ecr-s3.md) | [slide-7-ecr-s3.pptx](slide/slide-7-ecr-s3.pptx) | ✅ Pronta |
 | 8 | **Deploy end-to-end**: GitHub Actions senza chiavi (OIDC), server che si ricrea da solo (ASG), nome stabile, rotazione della password, rollback | [dispensa-8-deploy.md](dispense/dispensa-8-deploy.md) | [slide-8-deploy.pptx](slide/slide-8-deploy.pptx) | ✅ Pronta |
+| 9 | **Allarmi e auto-riparazione**: CloudWatch e SNS, notifiche dell'ASG, liveness e readiness, watchdog, dead man's switch | [dispensa-9-allarmi.md](dispense/dispensa-9-allarmi.md) | [slide-9-allarmi.pptx](slide/slide-9-allarmi.pptx) | ✅ Pronta |
 | A | **Appendice**: IAM avanzato e audit | – | – | In preparazione |
 
 ---
@@ -99,6 +102,7 @@ infra/
 ├── deploy.tf          # lezione 8: lo stampo e l'Auto Scaling group
 ├── user_data.sh.tpl   # lezione 8: lo script di avvio del server
 ├── deploy/docker-compose.yml
+├── monitoring.tf      # lezione 9: allarmi, notifiche, watchdog
 └── outputs.tf         # cosa stampare alla fine
 ```
 
