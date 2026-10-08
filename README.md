@@ -29,6 +29,7 @@ flowchart LR
     L8 --> L9["9 · Il server<br/>che si ricrea"]
     L9 --> L10["10 · Allarmi"]
     L10 -.-> L11["11 · EFS e Backup<br/>(facoltativa)"]
+    L10 -.-> LA["A · IAM avanzato<br/>e audit"]
 ```
 
 ---
@@ -64,7 +65,7 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 9 | **Il server che si ricrea da solo**: launch template e Auto Scaling group, nome stabile, script di avvio, rotazione della password, rilasci e rollback | [dispensa-9-server.md](dispense/dispensa-9-server.md) | [slide-9-server.pptx](slide/slide-9-server.pptx) | ✅ Pronta |
 | 10 | **Allarmi e auto-riparazione**: CloudWatch e SNS, notifiche dell'ASG, liveness e readiness, watchdog, dead man's switch | [dispensa-10-allarmi.md](dispense/dispensa-10-allarmi.md) | [slide-10-allarmi.pptx](slide/slide-10-allarmi.pptx) | ✅ Pronta |
 | 11 | **Facoltativa – File condivisi e backup**: EFS con access point e policy, AWS Backup con piano e ripristino | [dispensa-11-efs-backup.md](dispense/dispensa-11-efs-backup.md) | [slide-11-efs-backup.pptx](slide/slide-11-efs-backup.pptx) | ✅ Pronta |
-| A | **Appendice**: IAM avanzato e audit | – | – | In preparazione |
+| A | **Appendice – IAM avanzato e audit**: condition key, boundary e SCP, AccessDenied, trail di CloudTrail, chiave KMS tua, database con IAM, log incrociati | [appendice-a-iam-audit.md](dispense/appendice-a-iam-audit.md) | [slide-A-iam-audit.pptx](slide/slide-A-iam-audit.pptx) | ✅ Pronta |
 
 ---
 
@@ -132,6 +133,8 @@ infra/
 ├── monitoring.tf      # lezione 10: allarmi, notifiche, watchdog
 ├── storage.tf         # lezione 11 (facoltativa): EFS
 ├── backup.tf          # lezione 11 (facoltativa): AWS Backup
+├── audit.tf           # appendice: il trail di CloudTrail
+├── kms.tf             # appendice: una chiave KMS nostra
 └── outputs.tf         # cosa stampare alla fine
 ```
 
