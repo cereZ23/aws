@@ -51,7 +51,7 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 1 | **IAM: chi può fare cosa**: identità, policy, role, privilegi minimi | [dispensa-1-iam.md](dispense/dispensa-1-iam.md) | [slide-1-iam.pptx](slide/slide-1-iam.pptx) | ✅ Pronta |
 | 2 | **VPC: la rete privata**: indirizzi, subnet, route table, NAT | [dispensa-2-vpc.md](dispense/dispensa-2-vpc.md) | [slide-2-vpc.pptx](slide/slide-2-vpc.pptx) | ✅ Pronta |
 | 3 | **Firewall**: Security Group e NACL, porte, stateful e stateless | [dispensa-3-firewall.md](dispense/dispensa-3-firewall.md) | [slide-3-firewall.pptx](slide/slide-3-firewall.pptx) | ✅ Pronta |
-| 4 | **Accesso remoto**: Client VPN con MFA | – | – | In preparazione |
+| 4 | **Accesso remoto**: Client VPN con login aziendale e MFA, permessi per gruppo | [dispensa-4-vpn.md](dispense/dispensa-4-vpn.md) | [slide-4-vpn.pptx](slide/slide-4-vpn.pptx) | ✅ Pronta |
 | 5 | **EC2**: il server | – | – | In preparazione |
 | 6 | **RDS PostgreSQL** in alta affidabilità | – | – | In preparazione |
 | 7 | **S3**: il repository degli artefatti | – | – | In preparazione |
@@ -101,7 +101,7 @@ Parametri tecnici usati in tutto il corso:
 | Cosa | Valore |
 |---|---|
 | Terraform | `>= 1.10` |
-| Provider | `hashicorp/aws ~> 6.0`, `hashicorp/random ~> 3.6` |
+| Provider | `hashicorp/aws ~> 6.0`, `hashicorp/random ~> 3.6`, `hashicorp/tls ~> 4.0` (dalla lezione 4) |
 | Regione | `eu-south-1` (Milano) |
 | State | bucket S3 con `use_lockfile = true` (senza DynamoDB) |
 | Autenticazione | SSO (IAM Identity Center), profilo CLI `corso` |
