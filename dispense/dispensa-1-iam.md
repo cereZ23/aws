@@ -208,7 +208,7 @@ Trust policy per un role usato da EC2:
 }
 ```
 
-Tradotto: "il servizio EC2 può assumere questo role". Per collegarlo davvero a un'istanza serve poi un **instance profile**, che vedremo nella dispensa EC2.
+Tradotto: "il servizio EC2 può assumere questo role". Per collegarlo davvero a un'istanza serve poi un **instance profile**, che vedremo nella dispensa 4.
 
 ---
 

@@ -36,7 +36,7 @@ Alla fine di questa dispensa:
 | il database ha la CPU al massimo da un'ora, o sta finendo lo spazio | **nessuno**, finché non si ferma |
 | è giù **tutto**: la regione, l'account, la rete di casa da cui guardi | **nessuno**: anche gli strumenti che dovrebbero avvisarti sono giù |
 
-Le soluzioni sono tre, a strati:
+Le soluzioni sono quattro, a strati:
 
 ```mermaid
 flowchart TB
@@ -141,11 +141,11 @@ L'ASG controlla solo la macchina (`health_check_type = "EC2"`, dispensa 8). Non 
 flowchart TD
     T["Ogni minuto"] --> P{"C'è il file di pausa?<br/>(manutenzione)"}
     P -->|"sì"| S1["Non fare niente"]
-    P -->|"no"| G{"Il server è acceso<br/>da meno di 15 minuti?"}
-    G -->|"sì"| S2["Non fare niente:<br/>si sta ancora avviando"]
-    G -->|"no"| R{"/health/ready<br/>risponde 200?"}
+    P -->|"no"| R{"/health/ready<br/>risponde 200?"}
     R -->|"sì"| OK["Fallimenti = 0<br/>(e manda il 'sono vivo')"]
-    R -->|"no"| F["Fallimenti + 1"]
+    R -->|"no"| G{"Il server è acceso<br/>da meno di 15 minuti?"}
+    G -->|"sì"| S2["Non contare:<br/>si sta ancora avviando"]
+    G -->|"no"| F["Fallimenti + 1"]
     F --> Q{"5 fallimenti di fila?"}
     Q -->|"no"| S3["Aspetta il prossimo minuto"]
     Q -->|"sì"| U["Dice all'ASG:<br/>questo server è Unhealthy"]
@@ -154,7 +154,7 @@ flowchart TD
 
 I dettagli che contano:
 
-- **15 minuti di tolleranza** dopo l'avvio: al primo avvio il server installa Docker e scarica l'immagine, e l'app non è pronta. Senza tolleranza, il watchdog ucciderebbe ogni server appena nato.
+- **15 minuti di tolleranza** dopo l'avvio: al primo avvio il server installa Docker e scarica l'immagine, e l'app non è pronta. Senza tolleranza, il watchdog ucciderebbe ogni server appena nato. La tolleranza vale solo per **contare i fallimenti**: se l'app è già pronta, il controllo va a buon fine anche nei primi 15 minuti.
 - **5 fallimenti di fila**, non uno: un singolo errore (un failover del database, dispensa 6) dura un paio di minuti e si risolve da solo. Sostituire il server non servirebbe a niente.
 - **Il file di pausa**: prima di una manutenzione che rende l'app "non pronta" apposta (un ripristino del database, per esempio), crei `/etc/app/watchdog-pausa` e il watchdog si ferma. Ricordati di toglierlo dopo.
 - Il comando che fa sostituire il server è `aws autoscaling set-instance-health --health-status Unhealthy`. Il server ha il permesso di usarlo **solo sul suo ASG**.
@@ -171,7 +171,7 @@ Il **dead man's switch** ("interruttore dell'uomo morto") rovescia il ragionamen
 
 > **Analogia.** Il nome viene dai treni: il macchinista deve tenere premuto un pedale. Se lo lascia (perché sta male), il treno si ferma da solo. Non serve che qualcuno si accorga del malore: basta che il segnale "ci sono" smetta.
 
-Nel nostro progetto il "sono vivo" lo manda il **watchdog**, solo quando l'app risponde `200` a `/health/ready`: quindi vuol dire "server acceso, app in funzione, database raggiungibile", tutto insieme. Il servizio esterno (per esempio healthchecks.io) ti dà un **indirizzo** da chiamare; lo imposti con un periodo di 1 minuto e una tolleranza di 5.
+Nel nostro progetto il "sono vivo" lo manda il **watchdog**, solo quando l'app risponde `200` a `/health/ready`: quindi vuol dire "server acceso, app in funzione, database raggiungibile", tutto insieme. Il servizio esterno (per esempio healthchecks.io) ti dà un **indirizzo** da chiamare; lo imposti con un periodo di 1 minuto e una tolleranza di 5. Il "sono vivo" parte appena l'app è pronta, anche su un server appena nato: una sostituzione normale (5-7 minuti di silenzio) non fa scattare l'allarme esterno.
 
 L'indirizzo è un piccolo segreto: chi lo conosce può mandare finti "sono vivo" e nascondere un guasto. Lo teniamo in **Secrets Manager** (dispensa 6), e il server lo legge all'avvio. È facoltativo: se la variabile è vuota, non si crea niente.
 
@@ -411,14 +411,15 @@ export AWS_DEFAULT_REGION=${region}
 STATO=/var/lib/app-watchdog
 
 [ -f /etc/app/watchdog-pausa ] && exit 0                     # manutenzione
-ETA=$(( $(date +%s) - $(stat -c %Y $STATO/avvio) ))
-[ "$ETA" -lt 900 ] && exit 0                                  # 15 minuti di tolleranza
 
 if curl -fs -m 5 -o /dev/null http://127.0.0.1:8080/health/ready; then
   echo 0 > $STATO/fallimenti
   [ -f /etc/app/heartbeat-url ] && curl -fs -m 5 -o /dev/null "$(cat /etc/app/heartbeat-url)"
   exit 0
 fi
+
+ETA=$(( $(date +%s) - $(stat -c %Y $STATO/avvio) ))
+[ "$ETA" -lt 900 ] && exit 0                     # si sta avviando: non contare
 
 N=$(( $(cat $STATO/fallimenti 2>/dev/null || echo 0) + 1 ))
 echo $N > $STATO/fallimenti

@@ -183,7 +183,7 @@ sequenceDiagram
 
 ## 6. L'avvio del server: lo script
 
-Ogni server nuovo esegue lo **stesso script di avvio** (`user_data`, dispensa 4), che lo porta da "macchina vuota" ad "applicazione in funzione" senza che nessuno ci metta le mani. Questa volta lo script è lungo, quindi non lo scriviamo dentro il blocco Terraform: sta in un file a parte, `user_data.sh.tpl`, e Terraform lo riempie con i valori giusti (sezione 11).
+Ogni server nuovo esegue lo **stesso script di avvio** (`user_data`, dispensa 4), che lo porta da "macchina vuota" ad "applicazione in funzione" senza che nessuno ci metta le mani. Questa volta lo script è lungo, quindi non lo scriviamo dentro il blocco Terraform: sta in un file a parte, `user_data.sh.tpl`, e Terraform lo riempie con i valori giusti (sezione 12).
 
 ```mermaid
 flowchart TD
@@ -210,7 +210,7 @@ La soluzione è un piccolo script sul server, `app-aggiorna`, che fa da intermed
 2. scrive un file `/etc/app/app.env` con l'indirizzo del database, il nome utente e la password (leggibile solo da root);
 3. **se il file è cambiato** rispetto a prima, (ri)avvia l'applicazione, che così riparte con la password nuova.
 
-Lo script gira all'avvio e poi **ogni 5 minuti**, grazie a un **timer di systemd** (systemd è il programma che avvia e controlla i servizi su Linux, dispensa 4; un timer è la sua "sveglia" che lancia un servizio a intervalli regolari). Quando RDS cambia la password, entro 5 minuti l'applicazione riparte con quella nuova: qualche secondo di fermo una volta a settimana. Nei minuti tra la rotazione e il controllo, le connessioni già aperte funzionano; quelle nuove no. Se non è accettabile, c'è l'alternativa della dispensa 6 (rotazione decisa da te).
+Lo script gira all'avvio e poi **ogni 5 minuti**, grazie a un **timer di systemd** (systemd è il programma che avvia e controlla i servizi su Linux, dispensa 4; un timer è la sua "sveglia" che lancia un servizio a intervalli regolari). Quando RDS cambia la password, entro 5 minuti l'applicazione riparte con quella nuova: qualche secondo di fermo una volta a settimana. Nei minuti tra la rotazione e il controllo, la nostra app, che apre una connessione nuova a ogni richiesta, risponde 503: al massimo 5 minuti. Se non è accettabile, c'è l'alternativa della dispensa 6 (rotazione decisa da te).
 
 ---
 
@@ -798,7 +798,7 @@ jobs:
 
 Le due condizioni sono in due blocchi separati: devono essere vere **tutte e due**. `StringEquals` vuol dire "uguale, lettera per lettera", senza asterischi.
 
-**`aws_iam_role.github_release`** e la sua permission policy `github_push`: il login al registry su `*` (come per il server, dispensa 7), e le cinque azioni che servono a **caricare** un'immagine (controllare quali pezzi ci sono già, caricare i pezzi nuovi, registrare l'immagine) solo sul nostro repository. GitHub non può fare nient'altro: né leggere segreti, né toccare server o database, né caricare in altri repository.
+**`aws_iam_role.github_release`** e la sua permission policy `github_push`: il login al registry su `*` (come per il server, dispensa 7), e le sei azioni che servono a **caricare** un'immagine (controllare quali pezzi ci sono già, caricare i pezzi nuovi, registrare l'immagine, rileggerla per verifica) solo sul nostro repository. GitHub non può fare nient'altro: né leggere segreti, né toccare server o database, né caricare in altri repository.
 
 **`deploy/docker-compose.yml`** descrive l'unico container. `image: ${IMAGE}` prende l'immagine dal file `/etc/app/.env`, che docker compose legge da solo (lo scrive lo script, passo 2). `restart: always` riavvia il container se si ferma, e anche dopo un riavvio del server. `ports` pubblica la porta 8080 del container sulla 8080 del server, quella che il SG `app` apre al router (dispensa 3). `env_file` passa al container le variabili del file scritto da `app-aggiorna`. `volumes` rende visibile dentro il container, in sola lettura (`ro`), il certificato della CA di RDS scaricato dallo script: serve per `verify-full` (dispensa 6). Attenzione: questo file **non** passa da `templatefile`, quindi `${IMAGE}` arriva così com'è sul server, ed è docker compose a sostituirlo.
 

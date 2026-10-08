@@ -424,7 +424,7 @@ output "artifacts_bucket" {
 
 **`aws_ecr_repository.app`** crea il repository. `name` è `corso-aws/app`: la barra non crea una cartella, è solo parte del nome, e serve a raggruppare i repository di un progetto. `image_tag_mutability = "IMMUTABLE"` rende i tag immutabili (sezione 3). Il blocco `image_scanning_configuration` accende la scansione al caricamento. Il blocco `encryption_configuration` sceglie la cifratura KMS: senza indicare una chiave, si usa quella gestita da AWS. Attenzione: la cifratura di un repository si sceglie alla creazione, come per il database; cambiarla vuol dire ricrearlo. `force_delete = true` permette al `destroy` di cancellare il repository anche se contiene immagini: in laboratorio è comodo, in produzione si toglie, perché è l'equivalente di un `deletion_protection` spento.
 
-**`aws_ecr_lifecycle_policy.app`** sono le regole di pulizia. Il contenuto è un documento JSON, costruito con **`jsonencode()`** come la policy di Tailscale nella dispensa 5. Ogni regola ha una priorità (`rulePriority`: si applica prima il numero più basso), una selezione (quali immagini) e un'azione (`expire`, cancella). La regola con `tagStatus = "any"` deve avere la priorità più bassa di tutte, cioè il numero più alto: AWS lo pretende.
+**`aws_ecr_lifecycle_policy.app`** sono le regole di pulizia. Il contenuto è un documento JSON, costruito con `jsonencode()` (dispensa 1). Ogni regola ha una priorità (`rulePriority`: si applica prima il numero più basso), una selezione (quali immagini) e un'azione (`expire`, cancella). La regola con `tagStatus = "any"` deve avere la priorità più bassa di tutte, cioè il numero più alto: AWS lo pretende.
 
 **`aws_s3_bucket.artifacts`** crea il bucket. Il nome contiene il numero dell'account (`data.aws_caller_identity.current`, dispensa 1): i nomi dei bucket sono unici al mondo, e così ognuno ha il suo senza conflitti. `force_destroy = true`, come per ECR, serve solo al laboratorio: permette di cancellare il bucket anche se contiene file.
 
@@ -456,7 +456,7 @@ Obiettivo: creare i due magazzini, caricare un'immagine e un file, e verificare 
 
 ### Passi
 
-1. **`terraform plan`** e **`terraform apply`**. Conta le risorse nuove: il repository e la sua pulizia, il bucket con le sue sei configurazioni e la policy, l'endpoint, la policy del server con il suo attachment.
+1. **`terraform plan`** e **`terraform apply`**. Conta le risorse nuove: il repository e la sua pulizia, il bucket con le sue cinque configurazioni e la policy, l'endpoint, la policy del server con il suo attachment.
 2. **In console.** **ECR → Repositories → corso-aws/app**: nelle impostazioni controlla *Tag immutability: Immutable* e *Scan on push: Enabled*. **S3 → il bucket `corso-aws-artifacts-…` → Permissions**: Block Public Access tutto *On*, la bucket policy con il Deny.
 3. **Costruisci un'immagine** (serve Docker). Nella cartella `infra/` leggi l'indirizzo del repository, poi spostati in una cartella nuova, fuori da `infra/`:
 

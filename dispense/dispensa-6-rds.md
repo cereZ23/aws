@@ -568,7 +568,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
 
    (Atteso: la prima viene **rifiutata dal database**, con un errore che finisce con `no encryption`: è `rds.force_ssl`. La seconda viene **rifiutata dal client**: il certificato del database contiene il nome, non l'indirizzo, e `verify-full` non si fida.)
 
-5. **Da casa, come amministratore.** Con Tailscale acceso e il tuo nome in `tailscale_admins` (dispensa 5), installa `psql` sul tuo computer (su Mac: `brew install libpq`; oppure un programma grafico come DBeaver). Scarica il certificato e leggi la password con il tuo login AWS:
+5. **Da casa, come amministratore.** Con Tailscale acceso e il tuo nome in `tailscale_admins` (dispensa 5), installa `psql` sul tuo computer: su Mac `brew install libpq && brew link --force libpq`; su Linux `sudo apt install postgresql-client` (o il pacchetto della tua distribuzione); su Windows l'installer di postgresql.org, oppure un programma grafico come DBeaver, che va bene ovunque. Scarica il certificato e leggi la password con il tuo login AWS:
 
    ```bash
    curl -sSo global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
@@ -576,7 +576,7 @@ Obiettivo: creare il database, collegarsi dal server e da casa, vedere chi viene
      --query SecretString --output text
    ```
 
-   e collegati con `psql "host=$(terraform output -raw db_address) dbname=app user=dbadmin sslmode=verify-full sslrootcert=global-bundle.pem"`, incollando la password quando la chiede. (Atteso: funziona. Il nome dell'endpoint, anche da casa, porta all'indirizzo privato `10.20.20.x`, che raggiungi attraverso il router.) Non lasciare la password in giro: chiudi il terminale quando hai finito.
+   e collegati con `psql "host=$(terraform output -raw db_address) dbname=app user=dbadmin sslmode=verify-full sslrootcert=global-bundle.pem"`, incollando la password quando la chiede: il comando di prima stampa un piccolo JSON con `username` e `password`, e ti serve il valore di `password`, senza virgolette. (Atteso: funziona. Il nome dell'endpoint, anche da casa, porta all'indirizzo privato `10.20.20.x`, che raggiungi attraverso il router.) Non lasciare la password in giro: chiudi il terminale quando hai finito.
 6. **Da casa, come sviluppatore.** Sposta il tuo nome in `tailscale_devs`, lancia `apply` e riprova il passo 5. (Atteso: la connessione **resta in attesa e scade**. Chi ti blocca? Tailscale: la policy del tailnet non dà a `group:dev` la porta 5432. Il SG `db` non c'entra: ti avrebbe fatto passare, perché arrivi dal router.) Rimettiti in `tailscale_admins` e fai `apply`.
 7. **Rompi la NACL (dispensa 3).** In `security.tf` commenta il blocco `db_out_ephemeral`, e questa volta **applica**. Dal server, ripeti `psql "$DB" -c "select 1;"`. (Atteso: resta in attesa. La richiesta arriva al database sulla 5432, ma la risposta non può uscire dalla subnet database verso le porte effimere.) Togli i `#`, applica di nuovo, riprova: funziona.
 8. **Il failover.** Nel server, lancia un ciclo che si collega ogni 2 secondi e stampa l'indirizzo del database che ha risposto:

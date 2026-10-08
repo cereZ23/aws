@@ -232,7 +232,7 @@ Nel codice la rendiamo una variabile, così lo stesso progetto serve a entrambi.
 >
 > Il prezzo: il server è direttamente su internet, protetto da **una** barriera (il Security Group) invece che da **due** (nessuna strada in ingresso, più il Security Group). Un errore nelle regole lo espone subito. Il database, invece, non va mai lì: resta nelle subnet senza uscita. Nel corso teniamo il NAT, perché rende più facile vedere la differenza tra pubblico e privato.
 
-Nella dispensa su S3 vedremo anche i **VPC endpoint**, che permettono di raggiungere servizi AWS come S3 senza passare dal NAT: più sicuri e, per S3, gratuiti.
+Nella dispensa 7 vedremo anche i **VPC endpoint**, che permettono di raggiungere servizi AWS come S3 senza passare dal NAT: più sicuri e, per S3, gratuiti.
 
 ---
 

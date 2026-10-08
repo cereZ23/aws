@@ -244,7 +244,7 @@ resource "tailscale_acl" "main" {
     }
 
     tagOwners = {
-      "tag:router-aws" = ["group:admin"]
+      "tag:router-aws" = ["autogroup:admin"]
     }
 
     acls = [
@@ -381,7 +381,7 @@ resource "aws_instance" "tailscale_router" {
 
 ### Cosa fa questo codice, blocco per blocco
 
-**1. La policy.** `tailscale_acl` scrive nel tuo tailnet la policy della sezione 6. Il contenuto è un documento JSON (dispensa 1): invece di scriverlo a mano lo costruiamo con la funzione **`jsonencode()`**, che trasforma una mappa HCL in JSON. Così possiamo usare variabili ed espressioni dentro la policy.
+**1. La policy.** `tailscale_acl` scrive nel tuo tailnet la policy della sezione 6. Il contenuto è un documento JSON (dispensa 1): lo costruiamo con `jsonencode()` (dispensa 1), così possiamo usare variabili ed espressioni dentro la policy. In `tagOwners`, `autogroup:admin` vuol dire "gli amministratori del tailnet", cioè tu: Tailscale lo sa da solo, senza elenchi. Così il gruppo `group:admin` della policy può anche restare vuoto (lo provi al passo 8 dell'esercizio).
 
 - `groups`: le liste dei nomi di login arrivano dalle variabili `tailscale_admins` e `tailscale_devs`.
 - `acls`: ogni regola ha `src` (chi) e `dst` (cosa). Le destinazioni hanno la forma `indirizzi:porta`. Le costruiamo con espressioni `for` (dispensa 2) sulle liste di CIDR della dispensa 3: `[for cidr in local.private_cidrs : "${cidr}:8080"]` dà `["10.20.10.0/24:8080", "10.20.11.0/24:8080"]`. La funzione **`concat()`** unisce due liste in una.
@@ -485,7 +485,6 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 7. **Spegni Tailscale** sul tuo computer e ripeti il passo 6. (Atteso: non risponde. Senza il tunnel, la rete privata non si raggiunge.) Riaccendilo.
 8. **Il gruppo.** In `terraform.tfvars` sposta il tuo nome da `tailscale_admins` a `tailscale_devs`, lancia `apply` e ripeti il passo 6. (Atteso: funziona ancora, gli sviluppatori raggiungono la 8080.) La prova sul database la faremo nella dispensa 6. Poi rimettiti tra gli amministratori.
 
-   Attenzione: `tailscale_admins` deve contenere almeno un nome, perché il tag del router lo assegnano gli amministratori.
 9. **Dentro il router.** Entra nel router con SSM, come nella dispensa 4, e lancia `tailscale status`: vedi l'elenco dei dispositivi del tailnet, compreso il tuo computer.
 10. **Pulizia.** `terraform destroy`. Il router scompare anche dalla console di Tailscale, perché era *effimero*. Nella console di Tailscale puoi revocare la chiave API (**Settings → Keys**).
 

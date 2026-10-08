@@ -372,14 +372,15 @@ Obiettivo: verificare che i file sopravvivono al server, fare un backup e ripris
 
    (Atteso: `/mnt/efs` è un file system grande "8.0E", cioè praticamente senza limite; il file appartiene a `1000 1000` anche se l'hai scritto con `sudo`: è l'access point.) Controlla anche dal container: `sudo docker compose --project-directory /etc/app exec app ls /app/files`.
 3. **Il file sopravvive al server.** Termina il server dalla console (come nella dispensa 8). Quando l'ASG ne ha creato un altro, entra e lancia `cat /mnt/efs/prova.txt`. (Atteso: il file c'è, anche se magari il server è nato nell'altra AZ.)
-4. **Il TLS è obbligatorio.** Sul server, prova a montare il file system **senza** TLS in un'altra cartella:
+4. **Senza TLS e senza role non si entra.** Sul server, prova a montare il file system "a mano", come un normale disco di rete NFS, **senza** l'aiuto di `amazon-efs-utils`: quindi senza TLS e senza presentare il role. L'ID del file system lo trovi con `grep efs /etc/fstab` (inizia con `fs-`):
 
    ```bash
    sudo mkdir -p /mnt/prova
-   sudo mount -t efs -o iam,accesspoint=<fsap-…> <fs-…>:/ /mnt/prova
+   sudo mount -t nfs4 -o nfsvers=4.1 <fs-…>.efs.eu-south-1.amazonaws.com:/ /mnt/prova
    ```
 
-   (Atteso: rifiutato, *access denied*. È il Deny della file system policy. Gli ID li trovi in `/etc/fstab`.)
+   (Atteso: rifiutato, *access denied*. La file system policy rifiuta il traffico non cifrato, e comunque lascia entrare solo il role del server. Con `amazon-efs-utils` non si potrebbe nemmeno provare: le opzioni `iam` e `accesspoint` funzionano solo insieme a `tls`.)
+
 5. **Un backup subito**, senza aspettare la notte. Dal tuo computer:
 
    ```bash
