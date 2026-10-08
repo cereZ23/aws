@@ -21,7 +21,7 @@ Alla fine di questa dispensa:
 ## Prima di iniziare
 
 - Si lavora nella **stessa cartella** `infra/`: questa dispensa aggiunge il file `tailscale.tf`, alcune variabili e un nuovo provider.
-- Servono la rete (dispensa 2), il Security Group `vpn` (dispensa 3) e il server dell'applicazione con il suo instance profile (dispensa 4).
+- Servono la rete (dispensa 2), il Security Group `vpn` (dispensa 3) il server dell'applicazione e la trust policy `ec2_trust` (dispensa 4).
 - Ti serve un **account Tailscale**, che crei nell'esercizio in uno dei due modi della sezione 5: con una **passkey** (nessun altro account) oppure con un account **GitHub** gratuito, protetto dal codice di **Google Authenticator**. Non serve nessun sistema di login aziendale.
 - Installa **Tailscale** sul tuo computer (Windows, macOS, Linux; anche sul telefono) e fai il login con lo stesso account.
 - Rinnova il login AWS: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
@@ -316,15 +316,30 @@ resource "aws_vpc_security_group_egress_rule" "vpn_stun" {
 }
 
 # ---------------------------------------------------------------
-# 4. Il subnet router
+# 4. Il subnet router: il suo role (solo SSM) e il server
 # ---------------------------------------------------------------
+
+resource "aws_iam_role" "router" {
+  name               = "${var.project}-tailscale-router"
+  assume_role_policy = data.aws_iam_policy_document.ec2_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "router_ssm" {
+  role       = aws_iam_role.router.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "router" {
+  name = "${var.project}-tailscale-router"
+  role = aws_iam_role.router.name
+}
 
 resource "aws_instance" "tailscale_router" {
   ami                    = data.aws_ssm_parameter.al2023.insecure_value
   instance_type          = "t4g.nano"
   subnet_id              = aws_subnet.private[local.azs[0]].id
   vpc_security_group_ids = [aws_security_group.vpn.id]
-  iam_instance_profile   = aws_iam_instance_profile.app.name
+  iam_instance_profile   = aws_iam_instance_profile.router.name
 
   associate_public_ip_address = false
 
@@ -385,9 +400,17 @@ resource "aws_instance" "tailscale_router" {
 
 La chiave finisce nello **state** e nel `user_data` del router: per questo la facciamo monouso e breve, così dopo il primo avvio non serve più a nessuno. Il `depends_on` dice a Terraform di creare la chiave **dopo** la policy, perché il tag `tag:router-aws` deve già esistere (è uno dei rari casi in cui serve, dispensa 0).
 
+Una conseguenza da ricordare: la chiave nello state è già **usata** (o scaduta) dopo il primo avvio. Se un giorno il router va ricreato (cambi il suo `user_data`, o lo distruggi), Terraform gli ripasserebbe **la stessa chiave**, che non vale più, e il router non entrerebbe nel tailnet. In quel caso si chiede a Terraform di rifare anche la chiave:
+
+```bash
+terraform apply -replace=tailscale_tailnet_key.router
+```
+
+`-replace` vuol dire "ricrea questa risorsa anche se non è cambiata". La chiave nuova cambia il `user_data`, e nello stesso `apply` il router viene ricreato con la chiave buona. Lo useremo nella dispensa 8.
+
 **3. Le uscite.** Tre regole in uscita aggiunte al SG `vpn` della dispensa 3: TCP 443, UDP 41641 e UDP 3478 verso internet (sezione 7). Le regole della dispensa 3 restano: il SG `vpn` continua a raggiungere tutta la nostra rete.
 
-**4. Il router.** È lo stesso schema del server della dispensa 4, con il SG `vpn`, il tipo `t4g.nano`, e lo **stesso instance profile** (`aws_iam_instance_profile.app`): al router serve solo SSM, cioè esattamente i permessi di quel role. Il `user_data` fa tre cose:
+**4. Il router.** Prima il suo **role**, con lo stesso schema della dispensa 4: la trust policy `ec2_trust` (già scritta lì, si riusa), la sola policy `AmazonSSMManagedInstanceCore` e l'instance profile. Perché non riusare il role del server dell'applicazione? Perché quel role, nelle prossime dispense, riceverà altri permessi (la password del database, gli artefatti…), e al router serve **solo** SSM: ogni server ha il suo role, con i permessi che servono a lui e basta (privilegio minimo, dispensa 1). Poi il server: è lo stesso schema della dispensa 4, con il SG `vpn`, il tipo `t4g.nano` e l'instance profile `router`. Il `user_data` fa tre cose:
 
 1. attiva l'**inoltro dei pacchetti** (`ip_forward`), e lo rende permanente scrivendolo in un file di configurazione;
 2. **installa Tailscale** con lo script ufficiale;

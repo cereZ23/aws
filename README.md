@@ -55,7 +55,7 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 5 | **Accesso remoto: Tailscale**: subnet router, login con passkey o GitHub + Google Authenticator, permessi per gruppo | [dispensa-5-tailscale.md](dispense/dispensa-5-tailscale.md) | [slide-5-tailscale.pptx](slide/slide-5-tailscale.pptx) | ✅ Pronta |
 | 6 | **RDS PostgreSQL in alta affidabilità**: Multi-AZ e failover, backup e PITR, KMS, password in Secrets Manager, protezione dalla cancellazione | [dispensa-6-rds.md](dispense/dispensa-6-rds.md) | [slide-6-rds.pptx](slide/slide-6-rds.pptx) | ✅ Pronta |
 | 7 | **Immagini e artefatti**: container e immagini, ECR con tag immutabili, bucket S3 chiuso a chiave, Gateway Endpoint | [dispensa-7-ecr-s3.md](dispense/dispensa-7-ecr-s3.md) | [slide-7-ecr-s3.pptx](slide/slide-7-ecr-s3.pptx) | ✅ Pronta |
-| 8 | **Deploy end-to-end**: GitHub Actions senza chiavi, ECR, server che si ricrea da solo (ASG) | – | – | In preparazione |
+| 8 | **Deploy end-to-end**: GitHub Actions senza chiavi (OIDC), server che si ricrea da solo (ASG), nome stabile, rotazione della password, rollback | [dispensa-8-deploy.md](dispense/dispensa-8-deploy.md) | [slide-8-deploy.pptx](slide/slide-8-deploy.pptx) | ✅ Pronta |
 | A | **Appendice**: IAM avanzato e audit | – | – | In preparazione |
 
 ---
@@ -95,6 +95,10 @@ infra/
 ├── secrets.tf         # lezione 6: il server legge la password del database
 ├── ecr.tf             # lezione 7: le immagini dei container
 ├── s3.tf              # lezione 7: i file di deploy
+├── github-oidc.tf     # lezione 8: GitHub entra in AWS senza chiavi
+├── deploy.tf          # lezione 8: lo stampo e l'Auto Scaling group
+├── user_data.sh.tpl   # lezione 8: lo script di avvio del server
+├── deploy/docker-compose.yml
 └── outputs.tf         # cosa stampare alla fine
 ```
 
