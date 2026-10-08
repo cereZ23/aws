@@ -59,6 +59,7 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 7 | **Immagini e artefatti**: container e immagini, ECR con tag immutabili, bucket S3 chiuso a chiave, Gateway Endpoint | [dispensa-7-ecr-s3.md](dispense/dispensa-7-ecr-s3.md) | [slide-7-ecr-s3.pptx](slide/slide-7-ecr-s3.pptx) | ✅ Pronta |
 | 8 | **Deploy end-to-end**: GitHub Actions senza chiavi (OIDC), server che si ricrea da solo (ASG), nome stabile, rotazione della password, rollback | [dispensa-8-deploy.md](dispense/dispensa-8-deploy.md) | [slide-8-deploy.pptx](slide/slide-8-deploy.pptx) | ✅ Pronta |
 | 9 | **Allarmi e auto-riparazione**: CloudWatch e SNS, notifiche dell'ASG, liveness e readiness, watchdog, dead man's switch | [dispensa-9-allarmi.md](dispense/dispensa-9-allarmi.md) | [slide-9-allarmi.pptx](slide/slide-9-allarmi.pptx) | ✅ Pronta |
+| 10 | **Facoltativa – File condivisi e backup**: EFS con access point e policy, AWS Backup con piano e ripristino | [dispensa-10-efs-backup.md](dispense/dispensa-10-efs-backup.md) | [slide-10-efs-backup.pptx](slide/slide-10-efs-backup.pptx) | ✅ Pronta |
 | A | **Appendice**: IAM avanzato e audit | – | – | In preparazione |
 
 ---
@@ -103,6 +104,8 @@ infra/
 ├── user_data.sh.tpl   # lezione 8: lo script di avvio del server
 ├── deploy/docker-compose.yml
 ├── monitoring.tf      # lezione 9: allarmi, notifiche, watchdog
+├── storage.tf         # lezione 10 (facoltativa): EFS
+├── backup.tf          # lezione 10 (facoltativa): AWS Backup
 └── outputs.tf         # cosa stampare alla fine
 ```
 
