@@ -622,8 +622,8 @@ infra/
 ├── iam.tf        # role e policy
 ├── vpc.tf        # rete, subnet, route table
 ├── security.tf   # security group e NACL
-├── vpn.tf        # Client VPN
-├── ec2.tf        # istanze
+├── ec2.tf        # il server
+├── tailscale.tf  # accesso remoto (VPN)
 ├── rds.tf        # database
 ├── s3.tf         # bucket artefatti
 ├── outputs.tf

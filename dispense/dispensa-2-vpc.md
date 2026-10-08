@@ -43,7 +43,7 @@ flowchart TB
     PRIVB <-.->|"solo traffico interno"| DBB
 ```
 
-**EC2** è il servizio AWS dei server virtuali (dispensa 5), **RDS** quello dei database gestiti (dispensa 6); una **AZ** (Availability Zone) è un data center della regione (sezione 3). Tre livelli, ciascuno duplicato su due AZ: le subnet pubbliche parlano con internet, le private escono solo tramite il NAT, le database non escono affatto. Nella versione da laboratorio c'è un solo NAT (nella AZ-a); in produzione ce n'è uno per AZ.
+**EC2** è il servizio AWS dei server virtuali (dispensa 4), **RDS** quello dei database gestiti (dispensa 6); una **AZ** (Availability Zone) è un data center della regione (sezione 3). Tre livelli, ciascuno duplicato su due AZ: le subnet pubbliche parlano con internet, le private escono solo tramite il NAT, le database non escono affatto. Nella versione da laboratorio c'è un solo NAT (nella AZ-a); in produzione ce n'è uno per AZ.
 
 Caratteristiche da ricordare:
 
@@ -107,7 +107,7 @@ Una `/24` ha quindi **251** indirizzi utilizzabili, non 256.
 Il CIDR di un VPC non si cambia a cuor leggero: cambiarlo in Terraform significa **distruggere e ricreare tutta la rete** e tutto quello che ci sta sopra. Si pianifica una volta, bene. Le regole:
 
 - Usare gli intervalli privati: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`.
-- **Non sovrapporsi** a nessuna rete con cui un giorno si dovrà comunicare: altri VPC, la rete aziendale *on-premise* (quella fisica dell'azienda, negli uffici o nel suo data center) e il **CIDR dei client VPN**. La VPN è il collegamento cifrato che fa "entrare" il tuo PC nella rete del VPC; la vediamo nella dispensa 4. Il motivo: se due reti collegate usano gli stessi indirizzi, per un indirizzo come `192.168.1.10` il computer non sa più se mandare il pacchetto da una parte o dall'altra.
+- **Non sovrapporsi** a nessuna rete con cui un giorno si dovrà comunicare: altri VPC, la rete aziendale *on-premise* (quella fisica dell'azienda, negli uffici o nel suo data center) e gli **indirizzi della VPN**. La VPN è il collegamento cifrato che fa "entrare" il tuo PC nella rete del VPC; la vediamo nella dispensa 5. Il motivo: se due reti collegate usano gli stessi indirizzi, per un indirizzo come `192.168.1.10` il computer non sa più se mandare il pacchetto da una parte o dall'altra.
 - **Evitare le reti di casa**: `192.168.0.0/24` e `192.168.1.0/24` sono i default di quasi tutti i router domestici. Se il VPC le usa, chi si collega in VPN da casa avrà esattamente quel conflitto.
 - Lasciare spazio per crescere: meglio subnet `/24` in un VPC `/16` che riempire tutto subito.
 
@@ -122,7 +122,7 @@ Il CIDR di un VPC non si cambia a cuor leggero: cambiarlo in Terraform significa
 | Privata AZ-b | `10.20.11.0/24` | |
 | Database AZ-a | `10.20.20.0/24` | RDS |
 | Database AZ-b | `10.20.21.0/24` | |
-| Client VPN | `10.100.0.0/22` | **Fuori** dal VPC, per scelta (dispensa 4) |
+| VPN Tailscale | `100.64.0.0/10` | **Fuori** dal VPC: gli indirizzi dei dispositivi Tailscale (dispensa 5) |
 
 La numerazione a decine (0, 10, 20) non è obbligatoria, ma rende i livelli riconoscibili a colpo d'occhio: un indirizzo `10.20.2x.x` è sicuramente un database.
 

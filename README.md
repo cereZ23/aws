@@ -6,8 +6,8 @@ Alla fine del corso avrai costruito, con un unico progetto Terraform:
 
 - una **rete privata** (VPC) distribuita su due data center;
 - i **firewall** che decidono cosa può passare;
-- un **accesso remoto** sicuro (Client VPN con MFA);
 - un **server** (EC2) gestito senza SSH;
+- un **accesso remoto** sicuro da casa (VPN Tailscale, con MFA);
 - un **database PostgreSQL** in alta affidabilità (RDS Multi-AZ);
 - un **archivio** per gli artefatti di rilascio (S3);
 - il **deploy** completo, dal codice al server.
@@ -19,8 +19,8 @@ flowchart LR
     L0["0 · Terraform<br/>le basi"] --> L1["1 · IAM<br/>chi può fare cosa"]
     L1 --> L2["2 · VPC<br/>la rete"]
     L2 --> L3["3 · Firewall"]
-    L3 --> L4["4 · VPN"]
-    L4 --> L5["5 · EC2"]
+    L3 --> L4["4 · EC2"]
+    L4 --> L5["5 · Tailscale"]
     L5 --> L6["6 · RDS"]
     L6 --> L7["7 · S3"]
     L7 --> L8["8 · Deploy"]
@@ -51,8 +51,8 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 1 | **IAM: chi può fare cosa**: identità, policy, role, privilegi minimi | [dispensa-1-iam.md](dispense/dispensa-1-iam.md) | [slide-1-iam.pptx](slide/slide-1-iam.pptx) | ✅ Pronta |
 | 2 | **VPC: la rete privata**: indirizzi, subnet, route table, NAT | [dispensa-2-vpc.md](dispense/dispensa-2-vpc.md) | [slide-2-vpc.pptx](slide/slide-2-vpc.pptx) | ✅ Pronta |
 | 3 | **Firewall**: Security Group e NACL, porte, stateful e stateless | [dispensa-3-firewall.md](dispense/dispensa-3-firewall.md) | [slide-3-firewall.pptx](slide/slide-3-firewall.pptx) | ✅ Pronta |
-| 4 | **Accesso remoto**: Client VPN con login aziendale e MFA, permessi per gruppo | [dispensa-4-vpn.md](dispense/dispensa-4-vpn.md) | [slide-4-vpn.pptx](slide/slide-4-vpn.pptx) | ✅ Pronta |
-| 5 | **EC2**: il server | – | – | In preparazione |
+| 4 | **EC2: il server**: AMI, user_data, role e instance profile, SSM senza SSH | [dispensa-4-ec2.md](dispense/dispensa-4-ec2.md) | [slide-4-ec2.pptx](slide/slide-4-ec2.pptx) | ✅ Pronta |
+| 5 | **Accesso remoto: Tailscale**: subnet router, login con MFA, permessi per gruppo | [dispensa-5-tailscale.md](dispense/dispensa-5-tailscale.md) | [slide-5-tailscale.pptx](slide/slide-5-tailscale.pptx) | ✅ Pronta |
 | 6 | **RDS PostgreSQL** in alta affidabilità | – | – | In preparazione |
 | 7 | **S3**: il repository degli artefatti | – | – | In preparazione |
 | 8 | **Deploy end-to-end** | – | – | In preparazione |
@@ -71,7 +71,7 @@ Ti servono:
 
 La regione del corso è **Milano (`eu-south-1`)**, che sugli account nuovi va attivata una volta dalla console. Il login si fa con **IAM Identity Center (SSO)** e credenziali temporanee: mai chiavi fisse. La procedura completa, passo per passo, è nella sezione "Prima di iniziare" e nella sezione 6 della [dispensa 0](dispense/dispensa-0-terraform.md).
 
-> **Attenzione ai costi.** Alcune risorse del corso (per esempio il NAT Gateway, la VPN e il database) si pagano a ore anche quando non si usano. Ogni esercizio si chiude con `terraform destroy`: prendi l'abitudine fin dalla prima lezione e imposta un budget con avviso nella console AWS.
+> **Attenzione ai costi.** Alcune risorse del corso (per esempio il NAT Gateway, i server e il database) si pagano a ore anche quando non si usano. Ogni esercizio si chiude con `terraform destroy`: prendi l'abitudine fin dalla prima lezione e imposta un budget con avviso nella console AWS.
 
 ---
 
@@ -89,8 +89,8 @@ infra/
 ├── iam.tf             # lezione 1
 ├── vpc.tf             # lezione 2
 ├── security.tf        # lezione 3
-├── vpn.tf             # lezione 4
-├── ec2.tf             # lezione 5
+├── ec2.tf             # lezione 4
+├── tailscale.tf       # lezione 5
 ├── rds.tf             # lezione 6
 ├── s3.tf              # lezione 7
 └── outputs.tf         # cosa stampare alla fine
@@ -101,7 +101,7 @@ Parametri tecnici usati in tutto il corso:
 | Cosa | Valore |
 |---|---|
 | Terraform | `>= 1.10` |
-| Provider | `hashicorp/aws ~> 6.0`, `hashicorp/random ~> 3.6`, `hashicorp/tls ~> 4.0` (dalla lezione 4) |
+| Provider | `hashicorp/aws ~> 6.0`, `hashicorp/random ~> 3.6`, `tailscale/tailscale` (dalla lezione 5) |
 | Regione | `eu-south-1` (Milano) |
 | State | bucket S3 con `use_lockfile = true` (senza DynamoDB) |
 | Autenticazione | SSO (IAM Identity Center), profilo CLI `corso` |

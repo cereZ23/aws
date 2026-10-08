@@ -29,9 +29,9 @@ Alla fine di questa dispensa:
 
 Riprendiamo l'architettura della dispensa 2. Nelle prossime dispense avremo:
 
-- un **server dell'applicazione** (EC2, dispensa 5) nelle subnet private;
+- un **server dell'applicazione** (EC2, dispensa 4) nelle subnet private;
 - un **database PostgreSQL** (RDS, dispensa 6) nelle subnet database;
-- gli **amministratori** e gli **sviluppatori**, collegati da casa con la **VPN** (dispensa 4).
+- gli **amministratori** e gli **sviluppatori**, collegati da casa con la **VPN** Tailscale (dispensa 5).
 
 Le route table permettono già a tutte le subnet di parlarsi (la rotta `local`). Ma non vogliamo che **chiunque** dentro la rete possa raggiungere il database. Vogliamo queste regole:
 
@@ -47,7 +47,7 @@ Le route table permettono già a tutte le subnet di parlarsi (la rotta `local`).
 Cosa vuol dire "il server verso internet, porta 443": è il server che **chiama fuori**, mai il contrario. Gli serve per:
 
 - scaricare gli **aggiornamenti di sicurezza** del sistema operativo e i programmi di cui ha bisogno;
-- parlare con i **servizi AWS**, che si raggiungono tutti in HTTPS sulla porta 443: SSM per entrarci senza SSH (dispensa 5), S3 per scaricare la nuova versione dell'applicazione (dispense 7 e 8), Secrets Manager per leggere la password del database (dispensa 6).
+- parlare con i **servizi AWS**, che si raggiungono tutti in HTTPS sulla porta 443: SSM per entrarci senza SSH (dispensa 4), S3 per scaricare la nuova versione dell'applicazione (dispense 7 e 8), Secrets Manager per leggere la password del database (dispensa 6).
 
 Il percorso è quello della dispensa 2: dalla subnet privata al NAT Gateway, poi all'Internet Gateway. Nessuno da internet può iniziare una connessione verso il server.
 
@@ -65,7 +65,7 @@ Un indirizzo IP identifica un **computer** (dispensa 2). Ma su un computer posso
 |---|---|
 | 443 | siti web cifrati (HTTPS), e quasi tutti i servizi AWS |
 | 5432 | il database PostgreSQL |
-| 22 | SSH, l'accesso remoto a un server (noi **non** lo useremo: dispensa 5) |
+| 22 | SSH, l'accesso remoto a un server (noi **non** lo useremo: dispensa 4) |
 | 8080 | la nostra applicazione (una scelta del corso) |
 
 Il **protocollo** è il tipo di traffico. Quasi tutto quello che ci interessa usa **TCP**, il protocollo delle connessioni "con conferma di ricezione".
@@ -167,14 +167,14 @@ Perché è meglio:
 
 | Security Group | Lo indossa | In ingresso | In uscita |
 |---|---|---|---|
-| `app` | il server dell'applicazione (dispensa 5) | porta 8080 dal SG `vpn` | porta 443 verso internet; porta 5432 verso il SG `db` |
+| `app` | il server dell'applicazione (dispensa 4) | porta 8080 dal SG `vpn` | porta 443 verso internet; porta 5432 verso il SG `db` |
 | `db` | il database (dispensa 6) | porta 5432 dal SG `app` e dal SG `vpn` | niente |
-| `vpn` | la VPN (dispensa 4) | niente | tutto, ma solo verso la nostra rete |
+| `vpn` | il router della VPN Tailscale (dispensa 5) | niente | tutto, ma solo verso la nostra rete (la dispensa 5 aggiunge le uscite verso Tailscale) |
 
 ```mermaid
 flowchart LR
-    VPN["SG vpn<br/>(la VPN, dispensa 4)"]
-    APP["SG app<br/>(il server, dispensa 5)"]
+    VPN["SG vpn<br/>(il router VPN, dispensa 5)"]
+    APP["SG app<br/>(il server, dispensa 4)"]
     DB["SG db<br/>(il database, dispensa 6)"]
     NET(("internet"))
     VPN -->|"8080"| APP
@@ -183,7 +183,7 @@ flowchart LR
     APP -->|"443"| NET
 ```
 
-Nota: il SG `vpn` vale per **tutti** quelli collegati in VPN. Distinguere gli amministratori (che possono raggiungere il database) dagli sviluppatori (che non possono) lo fa la VPN stessa, con le sue regole per gruppo: lo vediamo nella dispensa 4.
+Nota: il SG `vpn` lo indossa il **router** della VPN, e tutto il traffico di chi è collegato in VPN passa da lui. Distinguere gli amministratori (che possono raggiungere il database) dagli sviluppatori (che non possono) lo fa la VPN stessa, con le sue regole per gruppo: lo vediamo nella dispensa 5.
 
 Un dettaglio di Terraform da sapere: quando AWS crea un Security Group, gli mette da solo una regola "in uscita, consenti tutto". **Terraform la toglie**, così in uscita vale solo quello che scrivi tu. Per questo il SG `db`, senza regole in uscita, non può chiamare nessuno: un database non ne ha bisogno.
 
@@ -217,7 +217,7 @@ Le subnet pubbliche e private le lasciamo con la NACL di default (vedi sezione 7
 | 100, 101 | uscita | TCP 1024-65535 verso ciascuna subnet privata | **le risposte**, verso le porte effimere |
 | 200, 201 | uscita | tutto verso ciascuna subnet database | come sopra |
 
-E gli amministratori in VPN? Nella dispensa 4 la VPN verrà collegata alle **subnet private**: il suo traffico arriva al database con un indirizzo di quelle subnet, quindi queste regole valgono anche per lei.
+E gli amministratori in VPN? Nella dispensa 5 il router della VPN starà in una **subnet privata** e consegnerà il traffico con il proprio indirizzo: arriva al database da una subnet privata, quindi queste regole valgono anche per lui.
 
 ---
 
@@ -260,7 +260,7 @@ resource "aws_security_group" "db" {
 
 resource "aws_security_group" "vpn" {
   name        = "${var.project}-vpn"
-  description = "Client VPN"
+  description = "Router della VPN Tailscale"
   vpc_id      = aws_vpc.main.id
 }
 
@@ -419,7 +419,7 @@ output "sg_vpn_id" {
 }
 ```
 
-Le dispense 4, 5 e 6 useranno questi tre Security Group per la VPN, il server e il database.
+Le dispense 4, 5 e 6 useranno questi tre Security Group per il server, il router della VPN e il database.
 
 ### Cosa fa questo codice, blocco per blocco
 
@@ -478,7 +478,7 @@ Nota la coppia `db_in_postgres` e `db_out_ephemeral`: la prima fa entrare le ric
 
 Obiettivo: verificare che le regole fanno quello che dicono, poi romperle di proposito e vedere cosa succede.
 
-Per ora non abbiamo né server né database: arriveranno nelle dispense 5 e 6. Per fare le prove usiamo due cose:
+Per ora non abbiamo né server né database: arriveranno nelle dispense 4 e 6. Per fare le prove usiamo due cose:
 
 - delle **interfacce di rete** (*network interface*, ENI): sono le "prese di rete" a cui di solito si attaccano server e database. Le creiamo da sole, senza niente attaccato, e ognuna con il suo Security Group: per le regole di rete si comportano come il server o il database veri. Non costano niente;
 - il **Reachability Analyzer** di AWS: uno strumento che, date una sorgente e una destinazione, legge route table, NACL e Security Group e risponde "**raggiungibile**" o "**non raggiungibile, e per colpa di questa regola**". Senza mandare traffico vero. Ogni analisi ha un piccolo costo: ne faremo poche.
@@ -562,7 +562,7 @@ Poi **Create and analyze path**. Dopo qualche decina di secondi lo stato diventa
    ```
 
    `/32` vuol dire "esattamente questo indirizzo" (tutti i 32 bit fissi, dispensa 2). Applica e rilancia l'analisi del passo 2. (Atteso: **Not reachable**, colpa della NACL: la regola 50 viene letta prima della 100.) Poi togli il blocco e riapplica: torna **Reachable**.
-5. **Togli le porte effimere.** In `security.tf` commenta tutto il blocco `db_out_ephemeral` (metti `#` davanti a ogni riga) e lancia **solo `terraform plan`**. Cosa verrebbe cancellato? Senza applicare, rispondi: la richiesta del server arriverebbe al database? E la risposta tornerebbe al server? (Atteso: la richiesta sì, la risposta no, quindi la connessione non funziona: sezione 4.) Rimuovi i `#`. Lo vedremo succedere davvero, con un server e un database veri, nelle dispense 5 e 6.
+5. **Togli le porte effimere.** In `security.tf` commenta tutto il blocco `db_out_ephemeral` (metti `#` davanti a ogni riga) e lancia **solo `terraform plan`**. Cosa verrebbe cancellato? Senza applicare, rispondi: la richiesta del server arriverebbe al database? E la risposta tornerebbe al server? (Atteso: la richiesta sì, la risposta no, quindi la connessione non funziona: sezione 4.) Rimuovi i `#`. Lo vedremo succedere davvero, con un server e un database veri, nelle dispense 4 e 6.
 6. **Il SG di default.** In console: **VPC → Security groups**, apri quello chiamato `default` del tuo VPC. Ci sono regole in ingresso o in uscita? (Atteso: nessuna.) Aggiungine una a mano, poi lancia `terraform plan`: Terraform se ne accorge e propone di toglierla. Lancia `apply` per rimettere a posto.
 7. **Pulizia.** Cancella il file `lab-firewall.tf` e lancia `terraform apply`: le risorse del laboratorio spariscono, `security.tf` resta. Poi, a fine giornata, `terraform destroy` (il NAT della dispensa 2 si paga a ore). In console puoi cancellare anche i percorsi del Reachability Analyzer.
 
