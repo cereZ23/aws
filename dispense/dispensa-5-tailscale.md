@@ -10,11 +10,11 @@ Alla fine di questa dispensa:
 
 - sai cos'è una **VPN** e come funziona **Tailscale**;
 - sai cos'è un **subnet router** e perché ne serve uno per raggiungere la rete AWS;
-- sai come Tailscale riconosce chi si collega, con una **passkey** o un account personale (Google, Microsoft, GitHub), e come ottenere l'**MFA** senza nessun sistema di login aziendale;
+- sai come Tailscale riconosce chi si collega, con una **passkey** oppure con un account **GitHub** e il codice di **Google Authenticator**, senza nessun sistema di login aziendale;
 - sai dare permessi diversi per **gruppo**: gli amministratori raggiungono anche il database, gli sviluppatori solo l'applicazione;
 - dal tuo computer, a casa, apri l'applicazione della dispensa 4 sulla porta 8080, come se fossi dentro la rete.
 
-> **Perché Tailscale e non la VPN di AWS?** AWS ha un suo servizio di VPN (*AWS Client VPN*), ma si paga a ore per ogni subnet collegata anche quando nessuno lo usa, e la configurazione del login con MFA è lunga. Tailscale ha un piano gratuito per piccoli gruppi, ci costa solo un server piccolissimo, e l'MFA arriva da una passkey o dal login che usi già, senza bisogno di un sistema di login aziendale.
+> **Perché Tailscale e non la VPN di AWS?** AWS ha un suo servizio di VPN (*AWS Client VPN*), ma si paga a ore per ogni subnet collegata anche quando nessuno lo usa, e la configurazione del login con MFA è lunga. Tailscale ha un piano gratuito per piccoli gruppi, ci costa solo un server piccolissimo, e l'MFA arriva da una passkey o da Google Authenticator, senza bisogno di un sistema di login aziendale.
 
 ---
 
@@ -22,7 +22,7 @@ Alla fine di questa dispensa:
 
 - Si lavora nella **stessa cartella** `infra/`: questa dispensa aggiunge il file `tailscale.tf`, alcune variabili e un nuovo provider.
 - Servono la rete (dispensa 2), il Security Group `vpn` (dispensa 3) e il server dell'applicazione con il suo instance profile (dispensa 4).
-- Ti serve un **account Tailscale**: si crea su tailscale.com con una **passkey** (l'impronta, il viso o il PIN del tuo computer o telefono) oppure con un account personale **Google, Microsoft o GitHub** che abbia la **verifica in due passaggi** attiva. **Non serve nessun sistema di login aziendale** (sezione 5).
+- Ti serve un **account Tailscale**, che crei nell'esercizio in uno dei due modi della sezione 5: con una **passkey** (nessun altro account) oppure con un account **GitHub** gratuito, protetto dal codice di **Google Authenticator**. Non serve nessun sistema di login aziendale.
 - Installa **Tailscale** sul tuo computer (Windows, macOS, Linux; anche sul telefono) e fai il login con lo stesso account.
 - Rinnova il login AWS: `aws sso login --profile corso` ed `export AWS_PROFILE=corso`.
 - **Costi:** su AWS si aggiunge un server EC2 piccolissimo (il router), che si paga a ore, più il NAT della dispensa 2. Tailscale, per l'uso del corso, rientra nel piano gratuito (controlla le condizioni attuali sul sito). Alla fine: `terraform destroy`.
@@ -97,19 +97,22 @@ Il router deve annunciare le subnet che vogliamo raggiungere (*advertise routes*
 
 ## 5. Chi si collega: login e MFA
 
-Tailscale non ha password sue. Per entrare nel tailnet ti identifichi in uno di questi modi, e **nessuno richiede un sistema di login aziendale** (quello che nei documenti tecnici si chiama *IdP*, *identity provider*):
+Tailscale non ha password sue: per entrare nel tailnet ti identifichi in un altro modo. **Non serve nessun sistema di login aziendale.** Nel corso usiamo uno di questi due:
 
-| Modo | Come funziona | Il secondo fattore (MFA) |
+| Modo | Cosa serve per entrare | Il secondo fattore (MFA) |
 |---|---|---|
-| **Passkey** (consigliata) | ti registri su Tailscale con l'impronta, il viso o il PIN del tuo computer o telefono. Nessun account esterno | **c'è già**: serve il tuo dispositivo **e** la tua impronta o il PIN. È anche il modo più resistente al phishing |
-| **Account personale** Google, Microsoft o GitHub | fai il login con quell'account | solo se su quell'account è attiva la **verifica in due passaggi** |
-| **Login aziendale** (Okta, Entra ID…) | per le aziende che ce l'hanno già | lo gestisce l'azienda |
+| **1. Passkey** (consigliata) | l'impronta, il viso o il PIN del tuo computer o telefono. Nessun altro account | **già incluso**: serve il tuo dispositivo **e** la tua impronta o il PIN |
+| **2. Account GitHub + Google Authenticator** | utente e password di un account GitHub gratuito, creato apposta | il **codice a 6 cifre** dell'app Google Authenticator sul telefono |
+
+**La passkey** è la strada più semplice e la più sicura: non c'è nessuna password da rubare, e non funziona su un sito falso (è resistente al *phishing*, le pagine finte che imitano quelle vere per rubare le credenziali).
+
+**L'account GitHub con Google Authenticator** è la strada classica "utente, password e codice dal telefono". GitHub è un sito molto usato da chi scrive codice; l'account è gratuito e qui ci serve solo per entrare in Tailscale. **Google Authenticator** è un'app per telefono che genera un codice nuovo ogni 30 secondi: senza il telefono, la password da sola non basta.
 
 Ne segue la regola più importante della dispensa:
 
-> **Nessuno entra nel tailnet con una sola password.** Con la passkey il secondo fattore c'è già. Con un account Google, Microsoft o GitHub, la verifica in due passaggi su quell'account è **obbligatoria**: se non ce l'ha, la VPN sarebbe protetta da una password sola.
+> **Nessuno entra nel tailnet con una password sola.** Con la passkey il secondo fattore c'è già; con GitHub, la verifica in due passaggi con Google Authenticator è **obbligatoria** e va attivata **prima** di entrare in Tailscale.
 
-Nei gruppi della policy (sezione 6) ogni persona si indica con il suo **nome di login in Tailscale**: lo trovi nella console di Tailscale, alla voce **Users**. Per chi usa un account Google è la sua email.
+Nei gruppi della policy (sezione 6) ogni persona si indica con il suo **nome di login in Tailscale**: lo trovi nella console di Tailscale, alla voce **Users** (per chi entra con GitHub ha la forma `nomeutente@github`).
 
 In più, Tailscale aggiunge due protezioni utili:
 
@@ -417,7 +420,18 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 
 ### Passi
 
-1. **Account e MFA.** Crea il tuo account Tailscale con una **passkey**, oppure con un account Google, Microsoft o GitHub che abbia la **verifica in due passaggi** attiva. Installa Tailscale sul tuo computer e fai il login: nella console web di Tailscale (**Machines**) compare il tuo computer, con un indirizzo `100.x.y.z`. Alla voce **Users** trovi il tuo nome di login: serve al passo 3.
+1. **Account e MFA.** Scegli uno dei due modi della sezione 5.
+
+   **Modo 1 – Passkey.** Su tailscale.com scegli di iniziare (*Get started*) e, tra i modi di accesso, la **passkey**. Il browser ti chiede di confermare con impronta, viso o PIN: fatto, nessun altro account.
+
+   **Modo 2 – GitHub con Google Authenticator.**
+   - Installa **Google Authenticator** sul telefono.
+   - Su github.com crea un account (**Sign up**: email, password, nome utente).
+   - In GitHub: foto profilo in alto a destra → **Settings** → **Password and authentication** → **Enable two-factor authentication** → scegli l'**app di autenticazione**. Inquadra il QR code con Google Authenticator e scrivi il codice a 6 cifre che compare.
+   - **Salva i codici di recupero** che GitHub ti mostra (in un posto sicuro): servono se perdi il telefono.
+   - Su tailscale.com scegli di entrare **con GitHub**. Al login GitHub ti chiederà password **e** codice di Google Authenticator.
+
+   Poi installa Tailscale sul tuo computer e fai il login nello stesso modo: nella console web di Tailscale (**Machines**) compare il tuo computer, con un indirizzo `100.x.y.z`. Alla voce **Users** trovi il tuo nome di login: serve al passo 3.
 2. **La chiave API.** Nella console di Tailscale: **Settings → Keys → Generate API access token**. Copiala e, nel terminale:
 
    ```bash
@@ -452,7 +466,7 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 
 1. Perché il router può stare in una subnet privata, senza indirizzo pubblico e senza porte aperte in ingresso?
 2. A cosa serve il subnet router? Perché non installiamo Tailscale direttamente sul database?
-3. Chi fa l'MFA quando ti colleghi a Tailscale con una passkey? E con un account Google? Cosa succede se l'account Google di un collega non ha la verifica in due passaggi?
+3. Dove sta il secondo fattore quando entri con una passkey? E quando entri con GitHub? Cosa succede se un collega entra con un account GitHub senza la verifica in due passaggi?
 4. Uno sviluppatore prova a collegarsi al database. Chi lo blocca: Tailscale o il Security Group? E un amministratore, passa?
 5. Per il database, da quale indirizzo arriva una connessione fatta da casa tramite Tailscale? Perché è importante per le regole della dispensa 3?
 6. Perché la chiave d'ingresso del router è monouso e scade dopo un'ora?
@@ -463,7 +477,7 @@ Obiettivo: costruire il subnet router, collegarti con Tailscale e aprire dal tuo
 
 - La **VPN** è un tunnel cifrato dal tuo computer alla rete privata. **Tailscale** collega i dispositivi in un **tailnet**, con traffico diretto e cifrato e **nessuna porta da aprire**.
 - Il **subnet router** è un piccolo server EC2 nella subnet privata che annuncia le nostre subnet al tailnet. Indossa il **SG `vpn`**, quindi le regole della dispensa 3 valgono senza modifiche.
-- Il login **non richiede un sistema aziendale**: una **passkey** (MFA già inclusa) o un account Google, Microsoft o GitHub con la **verifica in due passaggi obbligatoria**.
+- Il login **non richiede un sistema aziendale**: una **passkey** (MFA già inclusa) oppure un account **GitHub** con il codice di **Google Authenticator** (obbligatorio).
 - La **policy del tailnet** dice chi raggiunge cosa: `group:admin` anche il database sulla 5432, `group:dev` solo l'applicazione sulla 8080. Poi decidono i **Security Group**.
 - Terraform gestisce **tutto**: la policy, la chiave d'ingresso (monouso, breve, effimera) e il router.
 - **SSM** per i comandi sul server, **Tailscale** per i collegamenti di rete.
