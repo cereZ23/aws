@@ -50,7 +50,7 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 0 | **Terraform: le basi**: cos'è, come si scrive, come si usa, lo state | [dispensa-0-terraform.md](dispense/dispensa-0-terraform.md) | [slide-0-terraform.pptx](slide/slide-0-terraform.pptx) | ✅ Pronta |
 | 1 | **IAM: chi può fare cosa**: identità, policy, role, privilegi minimi | [dispensa-1-iam.md](dispense/dispensa-1-iam.md) | [slide-1-iam.pptx](slide/slide-1-iam.pptx) | ✅ Pronta |
 | 2 | **VPC: la rete privata**: indirizzi, subnet, route table, NAT | [dispensa-2-vpc.md](dispense/dispensa-2-vpc.md) | [slide-2-vpc.pptx](slide/slide-2-vpc.pptx) | ✅ Pronta |
-| 3 | **Firewall**: Security Group e NACL | – | – | In preparazione |
+| 3 | **Firewall**: Security Group e NACL, porte, stateful e stateless | [dispensa-3-firewall.md](dispense/dispensa-3-firewall.md) | [slide-3-firewall.pptx](slide/slide-3-firewall.pptx) | ✅ Pronta |
 | 4 | **Accesso remoto**: Client VPN con MFA | – | – | In preparazione |
 | 5 | **EC2**: il server | – | – | In preparazione |
 | 6 | **RDS PostgreSQL** in alta affidabilità | – | – | In preparazione |
