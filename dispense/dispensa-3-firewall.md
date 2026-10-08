@@ -40,9 +40,16 @@ Le route table permettono già a tutte le subnet di parlarsi (la rotta `local`).
 | Il server dell'applicazione | il database, porta 5432 | **sì** |
 | Un amministratore in VPN | il database, porta 5432 | **sì** |
 | Un utente in VPN | l'applicazione, porta 8080 | **sì** |
-| Il server dell'applicazione | internet, porta 443 (aggiornamenti, servizi AWS) | **sì** |
+| Il server dell'applicazione | internet, porta 443: **solo in uscita**, per scaricare aggiornamenti e parlare con i servizi AWS | **sì** |
 | Qualunque altra cosa | il database | **no** |
 | Internet | qualunque cosa | **no** |
+
+Cosa vuol dire "il server verso internet, porta 443": è il server che **chiama fuori**, mai il contrario. Gli serve per:
+
+- scaricare gli **aggiornamenti di sicurezza** del sistema operativo e i programmi di cui ha bisogno;
+- parlare con i **servizi AWS**, che si raggiungono tutti in HTTPS sulla porta 443: SSM per entrarci senza SSH (dispensa 5), S3 per scaricare la nuova versione dell'applicazione (dispense 7 e 8), Secrets Manager per leggere la password del database (dispensa 6).
+
+Il percorso è quello della dispensa 2: dalla subnet privata al NAT Gateway, poi all'Internet Gateway. Nessuno da internet può iniziare una connessione verso il server.
 
 Un **firewall** è proprio questo: un insieme di regole che dicono quale traffico può passare e quale no. AWS ne ha due, che lavorano insieme.
 
