@@ -62,7 +62,7 @@ data "aws_iam_policy_document" "solo_milano" {
 
 `not_actions` vuol dire "tutte le azioni **tranne** queste": il Deny colpisce tutto ciò che non è IAM, STS o supporto, se la regione non è Milano.
 
-**Permessi decisi dalle etichette** (in inglese *ABAC*, *Attribute-Based Access Control*). Invece di elencare le risorse una per una, si scrive una regola come "puoi fermare i server **che hanno la tua stessa etichetta** `team`": `aws:ResourceTag/team` deve essere uguale a `${aws:PrincipalTag/team}`. Con molti team e molte risorse, una policy sola basta per tutti. In TeleGRAMMO, per esempio, ogni nodo può toccare solo i volumi con la sua etichetta.
+**Permessi decisi dalle etichette** (in inglese *ABAC*, *Attribute-Based Access Control*). Invece di elencare le risorse una per una, si scrive una regola come "puoi fermare i server **che hanno la tua stessa etichetta** `team`": `aws:ResourceTag/team` deve essere uguale a `${aws:PrincipalTag/team}`. Con molti team e molte risorse, una policy sola basta per tutti.
 
 ---
 
