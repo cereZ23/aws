@@ -1,4 +1,4 @@
-# Dispensa 12 – GuardDuty: accorgersi degli attacchi
+# Dispensa 13 – GuardDuty: accorgersi degli attacchi
 
 *Corso: Infrastruttura AWS con Terraform*
 
@@ -19,7 +19,7 @@ Alla fine di questa dispensa:
 
 ## Prima di iniziare
 
-- Si lavora nella cartella `infra/` di sempre, con il progetto fino alla dispensa 10: servono il server (dispensa 9) e il topic SNS degli allarmi (dispensa 10). Questa dispensa aggiunge il file `guardduty.tf` e modifica `monitoring.tf`.
+- Si lavora nella cartella `infra/` di sempre, con il progetto fino alla dispensa 12: servono il server (dispensa 9) e il topic SNS degli allarmi (dispensa 10); CloudTrail (dispensa 12) è il registro che GuardDuty sorveglia. Questa dispensa aggiunge il file `guardduty.tf` e modifica `monitoring.tf`.
 - Rinnova il login: `aws sso login --profile corso`, `export AWS_PROFILE=corso`, `export TAILSCALE_API_KEY=…`.
 - **Costi:** GuardDuty ha **30 giorni di prova gratuita** per ogni account e regione; dopo si paga in base alla quantità di eventi e di traffico analizzati (in un progetto piccolo come il nostro, poco). La protezione dal malware si paga per ogni disco analizzato. A fine esercizio si cancella tutto.
 
@@ -33,7 +33,7 @@ Alla fine di questa dispensa:
 | un programma nascosto sul server comunica con un server di comando degli attaccanti | **no** |
 | il server viene usato per minare criptovalute, a basso regime | forse, se la CPU sale abbastanza e abbastanza a lungo |
 | qualcuno usa l'utente **root** dell'account (dispensa 0: mai) | **no** |
-| qualcuno spegne CloudTrail per non lasciare tracce (appendice) | **no** |
+| qualcuno spegne CloudTrail per non lasciare tracce (dispensa 12) | **no** |
 | da internet qualcuno prova le porte di un server alla ricerca di quelle aperte | **no** |
 
 Gli allarmi della dispensa 10 guardano **come sta** l'infrastruttura. Per gli attacchi bisogna guardare **cosa fa**, e riconoscere i comportamenti sospetti. È il lavoro di GuardDuty.
@@ -50,7 +50,7 @@ La cosa più comoda: **non devi installare niente** e nemmeno attivare i registr
 
 | Fonte | Cosa ci vede | La conosciamo dalla… |
 |---|---|---|
-| **eventi di gestione di CloudTrail** | chi chiama quali API, da dove | appendice A |
+| **eventi di gestione di CloudTrail** | chi chiama quali API, da dove | dispensa 12 |
 | **VPC Flow Logs** | quali indirizzi parlano con quali | dispensa 2 |
 | **log DNS** del VPC | quali nomi di dominio chiedono i server | dispensa 2 (il DNS del VPC) |
 
@@ -90,7 +90,7 @@ Alcuni finding che riguardano proprio il nostro progetto:
 | `Backdoor:EC2/C&CActivity.B!DNS` | un server chiede il nome di un **server di comando** di attaccanti | un programma nascosto sul server |
 | `CryptoCurrency:EC2/BitcoinTool.B!DNS` | un server parla con domini legati al **mining** | il server lavora per qualcun altro |
 | `Policy:IAMUser/RootCredentialUsage` | qualcuno ha usato l'utente **root** | dispensa 0: il root non si usa mai |
-| `Stealth:IAMUser/CloudTrailLoggingDisabled` | qualcuno ha **spento** un trail | appendice A |
+| `Stealth:IAMUser/CloudTrailLoggingDisabled` | qualcuno ha **spento** un trail | dispensa 12 (lì c'è anche un allarme suo) |
 | `Recon:EC2/PortProbeUnprotectedPort` | da internet qualcuno prova una porta **aperta** di un server | con i nostri Security Group (dispensa 3) non dovrebbe succedere |
 
 La **gravità** è un numero da 1 a 10, raggruppato in livelli:
@@ -288,7 +288,7 @@ Qualche dettaglio:
 - **Isolare** prima di spegnere: un server spento perde le tracce in memoria, uno isolato smette solo di parlare. Un Security Group **senza regole** (né in ingresso né in uscita) lo taglia fuori. Con un server in un ASG, prima lo si **toglie dal gruppo** (*detach*), altrimenti l'ASG lo sostituisce mentre lo stai guardando.
 - **Revocare le sessioni** del role: in console, **IAM → Roles → corso-aws-app-server → Revoke active sessions**. AWS aggiunge al role una policy che nega tutto alle credenziali emesse **prima** di quel momento: quelle rubate smettono di funzionare, e il server nuovo ne riceve di fresche.
 - **Sostituire**, non riparare: il server è bestiame. Un server compromesso non si "pulisce": se ne crea uno nuovo dallo stampo, e la causa si cerca sulla copia del disco.
-- Se il finding riguarda **un utente o una persona** (per esempio l'uso del root, o di un login SSO da un paese strano): cambia la password e l'MFA di quell'identità, e guarda in CloudTrail cosa ha fatto (appendice A, sezione 4).
+- Se il finding riguarda **un utente o una persona** (per esempio l'uso del root, o di un login SSO da un paese strano): cambia la password e l'MFA di quell'identità, e guarda in CloudTrail cosa ha fatto (dispensa 12).
 
 ---
 

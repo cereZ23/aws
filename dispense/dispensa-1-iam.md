@@ -247,7 +247,7 @@ Il principio è semplice: **dare solo i permessi necessari, solo sulle risorse n
 
 Strumenti che aiutano:
 
-- **CloudTrail**: il registro delle chiamate API dell'account (chi, cosa, quando, da dove); in console, **CloudTrail → Event history**.
+- **CloudTrail**: il registro delle chiamate API dell'account (chi, cosa, quando, da dove); in console, **CloudTrail → Event history**. Gli dedichiamo una lezione intera, la dispensa 12.
 - **IAM Access Analyzer**: segnala le risorse accessibili da fuori dell'account e propone policy basate sulle azioni davvero usate.
 - **Last accessed**: nella console IAM, mostra quali servizi un role ha usato e quando; quello che non si usa da mesi si toglie.
 
@@ -513,7 +513,7 @@ Se la prova 1 fallisce subito dopo l'`apply`, aspetta qualche secondo e riprova:
    Ripeti i punti 5 e 6. Cosa succede adesso e perché? (Atteso: la scrittura passa, la cancellazione resta negata: il Deny esplicito vince.) Poi togli la policy con lo stesso comando, scrivendo `detach-role-policy` al posto di `attach-role-policy`. Se la dimentichi attaccata, il `terraform destroy` non riesce a cancellare il role.
 3. Perché al punto 4 viene negato l'elenco della radice ma non la lettura del file?
 4. Nella trust policy, cosa cambierebbe se nel blocco `principals` mettessi `type = "Service"` e `identifiers = ["ec2.amazonaws.com"]` (il JSON della sezione 6)? Potresti ancora assumere il role dalla CLI?
-5. In console apri **CloudTrail → Event history** (regione Milano) e filtra per *Event name* = `AssumeRole`. Trovi le assunzioni del role fatte dalle prove? Chi le ha fatte? (La lettura del file, `GetObject`, qui non la vedi: le letture e scritture di file su S3 sono *data event*, che Event history non mostra. Per registrarle serve un *trail* dedicato, che vediamo nell'appendice.)
+5. In console apri **CloudTrail → Event history** (regione Milano) e filtra per *Event name* = `AssumeRole`. Trovi le assunzioni del role fatte dalle prove? Chi le ha fatte? (La lettura del file, `GetObject`, qui non la vedi: le letture e scritture di file su S3 sono *data event*, che Event history non mostra. Per registrarle serve un *trail* dedicato, che vediamo nella dispensa 12.)
 
 Alla fine: `terraform destroy`. Il file `releases/test.txt` caricato alla domanda 2 non è gestito da Terraform, ma `force_destroy = true` sul bucket (dispensa 0) fa sì che venga cancellato insieme al bucket.
 

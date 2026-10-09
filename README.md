@@ -12,7 +12,7 @@ Alla fine del corso avrai costruito, con un unico progetto Terraform:
 - i **magazzini** delle immagini e dei file di deploy (ECR e S3);
 - il **deploy** completo: GitHub costruisce l'immagine senza chiavi, il server si ricrea da solo;
 - gli **allarmi** e l'auto-riparazione;
-- la **sorveglianza** contro gli attacchi (GuardDuty);
+- il **registro** di chi ha fatto cosa (CloudTrail) e la **sorveglianza** contro gli attacchi (GuardDuty);
 - (facoltativo) i **file condivisi** e i **backup** (EFS, AWS Backup).
 
 Non serve conoscere né Terraform né AWS: ogni concetto è spiegato la prima volta che compare, ogni blocco di codice è spiegato blocco per blocco.
@@ -30,8 +30,9 @@ flowchart LR
     L8 --> L9["9 · Il server<br/>che si ricrea"]
     L9 --> L10["10 · Allarmi"]
     L10 -.-> L11["11 · EFS e Backup<br/>(facoltativa)"]
-    L10 --> L12["12 · GuardDuty"]
-    L12 -.-> LA["A · IAM avanzato<br/>e audit"]
+    L10 --> L12["12 · CloudTrail"]
+    L12 --> L13["13 · GuardDuty"]
+    L13 -.-> LA["A · IAM avanzato<br/>e audit"]
 ```
 
 ---
@@ -67,7 +68,8 @@ Ogni dispensa ha sempre la stessa struttura: **obiettivo → concetti con un'ana
 | 9 | **Il server che si ricrea da solo**: launch template e Auto Scaling group, nome stabile, script di avvio, rotazione della password, rilasci e rollback | [dispensa-9-server.md](dispense/dispensa-9-server.md) | [slide-9-server.pptx](slide/slide-9-server.pptx) | ✅ Pronta |
 | 10 | **Allarmi e auto-riparazione**: CloudWatch e SNS, notifiche dell'ASG, liveness e readiness, watchdog, dead man's switch | [dispensa-10-allarmi.md](dispense/dispensa-10-allarmi.md) | [slide-10-allarmi.pptx](slide/slide-10-allarmi.pptx) | ✅ Pronta |
 | 11 | **Facoltativa – File condivisi e backup**: EFS con access point e policy, AWS Backup con piano e ripristino | [dispensa-11-efs-backup.md](dispense/dispensa-11-efs-backup.md) | [slide-11-efs-backup.pptx](slide/slide-11-efs-backup.pptx) | ✅ Pronta |
-| 12 | **GuardDuty: accorgersi degli attacchi**: cosa sorveglia, i finding e la gravità, avvisi per email con EventBridge, prova con un finding vero, piano di risposta | [dispensa-12-guardduty.md](dispense/dispensa-12-guardduty.md) | [slide-12-guardduty.pptx](slide/slide-12-guardduty.pptx) | ✅ Pronta |
+| 12 | **CloudTrail: chi ha fatto cosa**: cosa registra, come si legge un evento, il trail fatto bene, firme dei log, ricerche e allarmi sugli eventi pericolosi, AccessDenied | [dispensa-12-cloudtrail.md](dispense/dispensa-12-cloudtrail.md) | [slide-12-cloudtrail.pptx](slide/slide-12-cloudtrail.pptx) | ✅ Pronta |
+| 13 | **GuardDuty: accorgersi degli attacchi**: cosa sorveglia, i finding e la gravità, avvisi per email con EventBridge, prova con un finding vero, piano di risposta | [dispensa-13-guardduty.md](dispense/dispensa-13-guardduty.md) | [slide-13-guardduty.pptx](slide/slide-13-guardduty.pptx) | ✅ Pronta |
 | A | **Appendice – IAM avanzato e audit**: condition key, boundary e SCP, AccessDenied, trail di CloudTrail, chiave KMS tua, database con IAM, log incrociati | [appendice-a-iam-audit.md](dispense/appendice-a-iam-audit.md) | [slide-A-iam-audit.pptx](slide/slide-A-iam-audit.pptx) | ✅ Pronta |
 
 ---
@@ -136,8 +138,8 @@ infra/
 ├── monitoring.tf      # lezione 10: allarmi, notifiche, watchdog
 ├── storage.tf         # lezione 11 (facoltativa): EFS
 ├── backup.tf          # lezione 11 (facoltativa): AWS Backup
-├── guardduty.tf       # lezione 12: GuardDuty e gli avvisi dei finding gravi
-├── audit.tf           # appendice: il trail di CloudTrail
+├── cloudtrail.tf      # lezione 12: il trail, le ricerche, gli allarmi sugli eventi
+├── guardduty.tf       # lezione 13: GuardDuty e gli avvisi dei finding gravi
 ├── kms.tf             # appendice: una chiave KMS nostra
 └── outputs.tf         # cosa stampare alla fine
 ```
