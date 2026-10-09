@@ -201,7 +201,7 @@ Per SNS cifrato servono due servizi in più:
 - **CloudWatch** (`cloudwatch.amazonaws.com`), che pubblica gli allarmi;
 - l'**Auto Scaling**, che pubblica le notifiche (dispensa 10) con il suo *service-linked role* `AWSServiceRoleForAutoScaling`, un role che AWS crea da solo nell'account la prima volta che usi un ASG.
 
-Entrambi hanno bisogno di `kms:Decrypt` e `kms:GenerateDataKey*` sulla chiave.
+Entrambi hanno bisogno di `kms:Decrypt` e `kms:GenerateDataKey*` sulla chiave. Se usi GuardDuty (dispensa 12), che manda i finding al topic tramite EventBridge, aggiungi allo stesso statement di CloudWatch anche il servizio `events.amazonaws.com`.
 
 **La rotazione** (`enable_key_rotation = true`) fa generare ad AWS un nuovo materiale della chiave ogni anno; i dati cifrati prima restano leggibili, perché KMS tiene le versioni vecchie. Non devi fare niente.
 
